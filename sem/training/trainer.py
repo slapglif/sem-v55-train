@@ -200,11 +200,12 @@ class SEMTrainer:
     def _enable_gradient_checkpointing(self):
         """Enable gradient checkpointing on Mamba and Cayley layers.
 
-        Wraps each Mamba layer's forward with torch.utils.checkpoint
-        to trade compute for memory. The propagator layers are also wrapped.
+        Wraps each layer's forward with torch.utils.checkpoint
+        to trade compute for memory and prevent gradient graph explosion.
         """
         from torch.utils.checkpoint import checkpoint
 
+        # Checkpoint Mamba layers
         for i, layer in enumerate(self.model.mamba_layers):
             original_forward = layer.forward
 
@@ -216,9 +217,27 @@ class SEMTrainer:
 
             layer.forward = make_ckpt_forward(original_forward)
 
-        logger.info(
-            f"Gradient checkpointing enabled on {len(self.model.mamba_layers)} Mamba layers"
-        )
+        # SEOP Fix 25: Also checkpoint propagator layers to prevent CG gradient explosion
+        if hasattr(self.model.propagator, "layers"):
+            for i, layer in enumerate(self.model.propagator.layers):
+                original_forward = layer.forward
+
+                def make_ckpt_forward(fwd):
+                    def ckpt_forward(x):
+                        return checkpoint(fwd, x, use_reentrant=False)
+
+                    return ckpt_forward
+
+                layer.forward = make_ckpt_forward(original_forward)
+
+            logger.info(
+                f"Gradient checkpointing enabled on {len(self.model.mamba_layers)} Mamba layers "
+                f"and {len(self.model.propagator.layers)} propagator layers"
+            )
+        else:
+            logger.info(
+                f"Gradient checkpointing enabled on {len(self.model.mamba_layers)} Mamba layers"
+            )
 
     def _resume(self, path: str):
         """Resume training from checkpoint."""

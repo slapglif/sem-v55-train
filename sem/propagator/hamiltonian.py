@@ -49,6 +49,9 @@ class GraphLaplacianHamiltonian(nn.Module):
         self._cached_w = None
         self._cached_degree = None
         self._cached_dense_A = None
+        # SEOP Fix 24: Pre-build symmetric sparse indices to avoid reconstruction
+        self._cached_sparse_idx: Tensor | None = None
+        self.register_buffer("_sparse_idx_sym", self._build_symmetric_indices(edges))
 
     def _build_sparsity_pattern(self, dim: int, sparsity: int) -> Tensor:
         """Build small-world sparsity pattern.
@@ -85,6 +88,17 @@ class GraphLaplacianHamiltonian(nn.Module):
         # Remove duplicate edges
         edges = torch.unique(edges, dim=1)
         return edges
+
+    def _build_symmetric_indices(self, edges: Tensor) -> Tensor:
+        """Pre-build symmetric COO indices for sparse matvec.
+
+        Returns [2, 2*num_edges] tensor with both (row,col) and (col,row) indices.
+        This avoids rebuilding the indices on every matvec call.
+        """
+        rows, cols = edges[0], edges[1]
+        # Concatenate both directions for symmetric matrix
+        idx = torch.cat([torch.stack([rows, cols]), torch.stack([cols, rows])], dim=1)
+        return idx
 
     def get_hamiltonian_dense(self) -> Tensor:
         """Build dense Hermitian Hamiltonian matrix.
@@ -189,14 +203,11 @@ class GraphLaplacianHamiltonian(nn.Module):
         D = self.dim
         device = w.device
 
-        # Create symmetric sparse matrix: both (rows,cols) and (cols,rows)
-        idx = torch.cat([torch.stack([rows, cols]), torch.stack([cols, rows])], dim=1)
-        w_sym = torch.cat([w, w])  # Duplicate weights for symmetry
-
         # Sparse matvec: A @ v where A is [D, D] sparse
         # v is [..., D], we reshape to [prod(...), D], multiply, then reshape back
         batch_shape = v.shape[:-1]
         v_flat = v.reshape(-1, D)  # [B*S, D]
+        w_sym = torch.cat([w, w])  # Duplicate weights for symmetry
 
         # Dense matmul for small D or XPU (sparse.mm not supported on XPU)
         if D <= 512 or device.type == "xpu":
@@ -208,6 +219,8 @@ class GraphLaplacianHamiltonian(nn.Module):
                 A_dense[cols, rows] = w
             Av_flat = v_flat @ A_dense.t()
         else:
+            # SEOP Fix 24: Use pre-built symmetric indices to avoid reconstruction
+            idx = self._sparse_idx_sym
             A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
             Av_flat = torch.sparse.mm(A_sparse, v_flat.t()).t()
 
@@ -262,9 +275,8 @@ class GraphLaplacianHamiltonian(nn.Module):
                 A_dense[cols, rows] = w
             Av_combined = v_combined @ A_dense.t()
         else:
-            idx = torch.cat(
-                [torch.stack([rows, cols]), torch.stack([cols, rows])], dim=1
-            )
+            # SEOP Fix 24: Use pre-built symmetric indices to avoid reconstruction
+            idx = self._sparse_idx_sym
             w_sym = torch.cat([w, w])
             A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
             Av_combined = torch.sparse.mm(A_sparse, v_combined.t()).t()
