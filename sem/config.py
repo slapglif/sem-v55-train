@@ -1,0 +1,154 @@
+"""Configuration dataclasses for SEM V5.5."""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+
+@dataclass
+class ModelConfig:
+    hidden_dim: int = 256
+    num_layers: int = 8
+    vocab_size: int = 32768
+    max_seq_length: int = 2048
+
+
+@dataclass
+class EncoderConfig:
+    sdr_sparsity: int = 32
+    sdr_candidates: int = 128
+    sinkhorn_epsilon: float = 0.05
+    sinkhorn_max_iter: int = 50
+    sinkhorn_tol: float = 1e-3
+
+
+@dataclass
+class SpinorConfig:
+    block_size: int = 8
+    num_blocks: int = 32
+    state_dim: int = 64
+    mimo_groups: int = 8
+    d_conv: int = 4
+
+
+@dataclass
+class PropagatorConfig:
+    cayley_dt: float = 0.1
+    cg_max_iter: int = 5  # 5 iterations sufficient for training; use 20 for inference
+    cg_tol: float = 1e-6
+    nonlinear_alpha: float = 0.1
+    laplacian_sparsity: int = 5
+
+
+@dataclass
+class QuantizerConfig:
+    codebook_size: int = 256
+    group_size: int = 2
+    fisher_ema_decay: float = 0.99
+    outlier_percentile: float = 0.01
+    dead_code_threshold: int = 100
+
+
+@dataclass
+class SamplerConfig:
+    temperature: float = 1.0
+    top_k: int = 50
+    top_p: float = 0.95
+
+
+@dataclass
+class TrainingConfig:
+    # Existing fields
+    batch_size: int = 32
+    learning_rate: float = 3e-4
+    weight_decay: float = 0.01
+    warmup_steps: int = 2000  # Changed from 1000
+    max_steps: int = 100000
+    gradient_clip: float = 1.0
+    dtype: str = "complex64"
+
+    # New fields
+    micro_batch_size: int = 4
+    gradient_checkpointing: bool = True
+    unitary_lambda: float = 0.1
+
+    # Logging
+    log_interval: int = 10
+    health_check_interval: int = 100
+    checkpoint_interval: int = 5000
+    keep_checkpoints: int = 3
+
+    # Data
+    dataset_name: str = "HuggingFaceFW/fineweb-edu"
+    tokenizer_path: str = "tokenizer/"
+    num_workers: int = 4
+    shuffle_buffer_size: int = 10000
+
+    # WSD Scheduler
+    scheduler_type: str = "wsd"
+    stable_steps: int = 0
+    decay_steps: int = 5000
+    lr_min_ratio: float = 0.1
+
+    # wandb
+    wandb_project: str = "sem-v55-lean-crystal"
+    wandb_enabled: bool = True
+
+
+@dataclass
+class CurriculumConfig:
+    enabled: bool = True
+    stages: list = field(
+        default_factory=lambda: [
+            {"min_score": 2, "seq_len": 512, "min_steps": 20000},
+            {"min_score": 3, "seq_len": 1024, "min_steps": 30000},
+            {"min_score": 3, "seq_len": 2048, "min_steps": 50000},
+        ]
+    )
+    transition_check_interval: int = 500
+    loss_plateau_threshold: float = 0.01
+    loss_plateau_window: int = 1000
+    lr_decay_per_stage: float = 0.7
+    stage_warmup_steps: int = 500
+    unitary_stability_threshold: float = 0.05
+
+
+@dataclass
+class DistillationConfig:
+    enabled: bool = True
+    alpha: float = 0.7
+    ema_decay_start: float = 0.999
+    ema_decay_end: float = 0.9999
+    ema_decay_ramp_steps: int = 10000
+    enable_at_stage: int = 2
+    temperature: float = 2.0
+
+
+@dataclass
+class SEMConfig:
+    model: ModelConfig = field(default_factory=ModelConfig)
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    spinor: SpinorConfig = field(default_factory=SpinorConfig)
+    propagator: PropagatorConfig = field(default_factory=PropagatorConfig)
+    quantizer: QuantizerConfig = field(default_factory=QuantizerConfig)
+    sampler: SamplerConfig = field(default_factory=SamplerConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
+    curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
+    distillation: DistillationConfig = field(default_factory=DistillationConfig)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "SEMConfig":
+        """Load configuration from YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+
+        config = cls()
+        for section_name, section_data in data.items():
+            if hasattr(config, section_name) and isinstance(section_data, dict):
+                section = getattr(config, section_name)
+                for key, value in section_data.items():
+                    if hasattr(section, key):
+                        setattr(section, key, value)
+        return config

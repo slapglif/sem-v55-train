@@ -1,0 +1,5 @@
+- [x] `sem/data/streaming.py`: Update `SequencePacker` to track token frequencies (EMA) <!-- id: 0 -->
+- [x] `sem/encoder/mesh_sdr.py`: Refactor `MESHEncoder` to use token frequencies in Sinkhorn cost matrix <!-- id: 1 -->
+- [x] `sem/model.py`: Replace `NLLLoss` with `UnitaryBornLoss` <!-- id: 2 -->
+- [x] `sem/training/distillation.py`: Refactor `EMATeacher` to use Phase-Magnitude EMA <!-- id: 3 -->
+- [x] Verify changes across the pipeline <!-- id: 4 -->

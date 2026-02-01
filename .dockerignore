@@ -1,0 +1,48 @@
+# VCS & IDE
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/
+.claude/
+.omc/
+
+# Python artifacts
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+*.dist-info/
+
+# Project artifacts
+runs/
+logs/
+*.log
+*.pt
+*.ckpt
+*.safetensors
+wandb/
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+nul
+
+# Dev/docs files
+tests/
+lean4/
+*.bat
+*.md
+cloud_train.sh
+uv.lock
+
+# Docker self-reference
+Dockerfile
+.dockerignore
+docker-compose*.yml

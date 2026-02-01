@@ -1,0 +1,97 @@
+# SEM V5.5 "Lean Crystal" - Max Aggression Configuration (XPU/NPU Optimized)
+# Optimized for: 16GB RAM / 8GB VRAM
+# Part of Wave 6: Trainer XPU & RAM Aggression
+
+model:
+  hidden_dim: 256          # 256 real units (isomorphic to 128 complex pairs)
+  num_layers: 16           # Increased depth to saturate 8GB VRAM
+  vocab_size: 32768
+  max_seq_length: 2048
+
+encoder:
+  sdr_sparsity: 32
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.05
+  sinkhorn_max_iter: 50
+  sinkhorn_tol: 1.0e-3
+
+spinor:
+  block_size: 8
+  num_blocks: 32
+  state_dim: 128          # Increased state capacity
+  mimo_groups: 16          # Increased parallelism
+  d_conv: 4
+
+propagator:
+  cayley_dt: 0.1
+  cg_max_iter: 40          # Higher precision for aggressive training
+  cg_tol: 1.0e-7
+  nonlinear_alpha: 0.1
+  laplacian_sparsity: 8
+
+quantizer:
+  codebook_size: 512
+  group_size: 2
+  fisher_ema_decay: 0.999
+  outlier_percentile: 0.01
+  dead_code_threshold: 50
+
+sampler:
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+training:
+  # Throughput Aggression
+  batch_size: 4096         # Global batch size
+  micro_batch_size: 128    # High micro-batch for VRAM saturation
+  gradient_checkpointing: true
+  
+  # Precision
+  dtype: float32           # Real-Block Isomorphism (R2) mapping
+  
+  # Optimization
+  learning_rate: 1.2e-3    # Scaled for 4096 batch size
+  weight_decay: 0.1
+  warmup_steps: 1000
+  max_steps: 100000
+  gradient_clip: 1.0
+
+  # Data Pipeline (RAM Optimized)
+  dataset_name: "HuggingFaceFW/fineweb-edu"
+  tokenizer_path: "tokenizer/"
+  num_workers: 6           # Reduced from 12 to avoid DataLoader warnings
+  shuffle_buffer_size: 20000
+  
+  # Scheduler
+  scheduler_type: "wsd"
+  stable_steps: 0
+  decay_steps: 10000
+  lr_min_ratio: 0.1
+
+  # Infrastructure
+  log_interval: 5
+  health_check_interval: 50
+  checkpoint_interval: 1000
+  keep_checkpoints: 5
+  wandb_project: "sem-v55-max-aggression"
+  wandb_enabled: true
+
+curriculum:
+  enabled: true
+  stages:
+    - min_score: 3         # Start with higher quality data
+      seq_len: 1024
+      min_steps: 10000
+    - min_score: 4
+      seq_len: 2048
+      min_steps: 40000
+
+distillation:
+  enabled: true
+  alpha: 0.5
+  ema_decay_start: 0.99
+  ema_decay_end: 0.9999
+  ema_decay_ramp_steps: 10000
+  enable_at_stage: 0
+  temperature: 1.5

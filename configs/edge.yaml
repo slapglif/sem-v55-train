@@ -1,0 +1,48 @@
+# SEM V5.5 - Edge/CPU Configuration
+model:
+  hidden_dim: 128
+  num_layers: 4
+  vocab_size: 32768
+  max_seq_length: 512
+
+encoder:
+  sdr_sparsity: 16
+  sdr_candidates: 64
+  sinkhorn_epsilon: 0.05
+  sinkhorn_max_iter: 30
+  sinkhorn_tol: 1.0e-3
+
+spinor:
+  block_size: 8
+  num_blocks: 16
+  state_dim: 32
+  mimo_groups: 4
+  d_conv: 4
+
+propagator:
+  cayley_dt: 0.1
+  cg_max_iter: 15
+  cg_tol: 1.0e-5
+  nonlinear_alpha: 0.1
+  laplacian_sparsity: 5
+
+quantizer:
+  codebook_size: 256
+  group_size: 2
+  fisher_ema_decay: 0.99
+  outlier_percentile: 0.01
+  dead_code_threshold: 100
+
+sampler:
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+training:
+  batch_size: 8
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 500
+  max_steps: 50000
+  gradient_clip: 1.0
+  dtype: complex64

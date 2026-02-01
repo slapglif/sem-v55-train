@@ -1,0 +1,1 @@
+"""Born Collapse Sampler module."""
