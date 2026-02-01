@@ -55,6 +55,7 @@ def _cg_solve(
     max_iter: int,
     tol: float,
     precond: Optional[Callable[[Tensor], Tensor]] = None,
+    x0: Optional[Tensor] = None,
 ) -> Tensor:
     """Conjugate Gradient solver for Hermitian positive definite systems."""
     is_complex = torch.is_complex(b)
@@ -98,8 +99,12 @@ def _cg_solve(
         else:
             p_fn = precond
 
-    x = torch.zeros_like(b_real)
-    r = b_real.clone()
+    if x0 is not None:
+        x = x0
+        r = b_real - matvec(x)
+    else:
+        x = torch.zeros_like(b_real)
+        r = b_real.clone()
 
     z = p_fn(r) if p_fn is not None else r
     p = z.clone()
@@ -135,18 +140,14 @@ def cg_solve(A: Tensor, b: Tensor, max_iter: int = 20, tol: float = 1e-6) -> Ten
 
 
 def cg_solve_sparse(
-    matvec_fn: Callable, b: Tensor, max_iter: int = 20, tol: float = 1e-6, precond=None
+    matvec_fn: Callable,
+    b: Tensor,
+    max_iter: int = 20,
+    tol: float = 1e-6,
+    precond=None,
+    x0: Optional[Tensor] = None,
 ) -> Tensor:
     """CG solve using sparse matvec with implicit differentiation.
-
-    Uses Anderson/DEQ-style implicit backward: forward CG runs detached,
-    backward solves adjoint system in one pass. This avoids storing all
-    CG iterations on the autograd tape (20x memory reduction).
-
-    The trick: compute x* with no_grad, then create a differentiable
-    "phantom" computation f(x*) = matvec(x*) that connects x* to the
-    parameters. The backward pass flows through this single matvec call
-    instead of through all CG iterations.
 
     Args:
         matvec_fn: Callable v -> A @ v (must be differentiable)
@@ -154,26 +155,17 @@ def cg_solve_sparse(
         max_iter: Maximum CG iterations
         tol: Convergence tolerance
         precond: Optional preconditioner callable(v) -> M^{-1} @ v
+        x0: Optional warm-start initial guess
 
     Returns:
         x: [..., D] complex64 solution
     """
-    # Forward: solve A @ x = b without recording CG iterations
     with torch.no_grad():
-        x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond)
+        x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond, x0=x0)
 
-    # Create differentiable connection to parameters via single matvec
-    # Implicit function theorem: if A(θ)x* = b, then
-    #   dx*/dθ = -A⁻¹ · (dA/dθ · x*)
-    # We approximate this by making x* depend on θ through:
-    #   x = x* + (b - A(θ)·x*).detach()·0 + (b - A(θ)·x*)
-    # At convergence b - A·x* ≈ 0, so the value is unchanged,
-    # but gradients flow through A(θ) in the residual term.
     if torch.is_grad_enabled() and b.requires_grad:
-        # One matvec with grad enabled for parameter gradient flow
         Ax = matvec_fn(x_star)
-        residual = b - Ax  # ≈ 0 at convergence
-        # Straight-through: value = x_star, but gradients flow through residual
+        residual = b - Ax
         x = x_star + residual
     else:
         x = x_star

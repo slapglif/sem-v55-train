@@ -51,6 +51,8 @@ class CayleySolitonPropagator(nn.Module):
         self.cg_max_iter = cg_max_iter
         self.cg_tol = cg_tol
         self.check_unitarity_flag = check_unitarity_flag
+        # Warm-start cache for faster CG convergence
+        self._psi_cache = None
 
         # SEOP Fix 9: Per-dimension Kerr coefficient
         # Scalar α applies uniform nonlinear coupling to all feature channels.
@@ -130,12 +132,16 @@ class CayleySolitonPropagator(nn.Module):
         B, S, _ = rhs_r.shape
         rhs_real_block = torch.stack([rhs_r, rhs_i], dim=-1).reshape(-1, D, 2)
 
+        x0 = None
+        if self._psi_cache is not None and self._psi_cache.shape == (B, S, D):
+            x0 = torch.view_as_real(self._psi_cache).reshape(-1, D, 2)
+
         psi_out_real_block = cg_solve_sparse(
-            a_minus_matvec_wrapped, rhs_real_block, self.cg_max_iter, self.cg_tol
+            a_minus_matvec_wrapped, rhs_real_block, self.cg_max_iter, self.cg_tol, x0=x0
         )
 
-        # Boundary: Convert back to complex
         psi_out = torch.view_as_complex(psi_out_real_block.reshape(B, S, D, 2))
+        self._psi_cache = psi_out.detach().clone()
 
         # Clear cached weights (free memory, ensure fresh compute next forward)
         self.hamiltonian.clear_cache()
