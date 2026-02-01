@@ -46,6 +46,7 @@ class GraphLaplacianHamiltonian(nn.Module):
         # Learnable edge weights (real, will be symmetrized)
         self.edge_weights = nn.Parameter(torch.randn(num_edges) * 0.1)
         self._cached_w = None
+        self._cached_degree = None
 
     def _build_sparsity_pattern(self, dim: int, sparsity: int) -> Tensor:
         """Build small-world sparsity pattern.
@@ -171,17 +172,26 @@ class GraphLaplacianHamiltonian(nn.Module):
         )
         rows, cols = self.edge_indices[0], self.edge_indices[1]
 
-        v_cols, v_rows = v[..., cols], v[..., rows]
-        weighted_cols, weighted_rows = w * v_cols, w * v_rows
+        # Build sparse adjacency matrix A (symmetric)
+        # Use torch.sparse for memory-efficient matvec
+        D = self.dim
+        device = w.device
 
+        # Create symmetric sparse matrix: both (rows,cols) and (cols,rows)
+        idx = torch.cat([torch.stack([rows, cols]), torch.stack([cols, rows])], dim=1)
+        w_sym = torch.cat([w, w])  # Duplicate weights for symmetry
+
+        # Sparse matvec: A @ v where A is [D, D] sparse
+        # v is [..., D], we reshape to [prod(...), D], multiply, then reshape back
         batch_shape = v.shape[:-1]
-        res = torch.zeros_like(v)
+        v_flat = v.reshape(-1, D)  # [B*S, D]
 
-        cols_exp = cols.expand(*batch_shape, -1)
-        rows_exp = rows.expand(*batch_shape, -1)
+        # Build sparse matrix and multiply
+        A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
+        Av_flat = torch.sparse.mm(A_sparse, v_flat.t()).t()  # [B*S, D]
 
-        res.scatter_add_(-1, cols_exp, weighted_rows)
-        res.scatter_add_(-1, rows_exp, weighted_cols)
+        # Reshape back
+        res = Av_flat.reshape(*batch_shape, D)
 
         if self._cached_degree is not None:
             degree = self._cached_degree
