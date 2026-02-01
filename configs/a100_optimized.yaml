@@ -62,14 +62,14 @@ training:
   stable_steps: 0
   decay_steps: 10000
   lr_min_ratio: 0.1
-  log_interval: 10
-  health_check_interval: 500
-  checkpoint_interval: 2000
+  log_interval: 1
+  health_check_interval: 50
+  checkpoint_interval: 200
   keep_checkpoints: 5
   wandb_project: "sem-v55-a100"
   wandb_enabled: true
   timing_enabled: true
-  timing_log_interval: 50
+  timing_log_interval: 1
 
 curriculum:
   enabled: true
