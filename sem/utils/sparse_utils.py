@@ -4,13 +4,18 @@ Provides helpers for constructing sparse matrices (Graph Laplacian,
 transport plans) and sparse-dense operations used in the Cayley
 propagator and MESH encoder.
 """
+
 import torch
 from torch import Tensor
+from sem.utils.complex_ops import safe_complex
 
 
-def build_graph_laplacian(dim: int, sparsity: int = 5,
-                          dtype: torch.dtype = torch.complex64,
-                          device: torch.device | str = 'cpu') -> Tensor:
+def build_graph_laplacian(
+    dim: int,
+    sparsity: int = 5,
+    dtype: torch.dtype = torch.complex64,
+    device: torch.device | str = "cpu",
+) -> Tensor:
     """Build a sparse Graph Laplacian matrix for the Cayley propagator.
 
     Constructs a symmetric, positive semi-definite Laplacian L = D - A
@@ -65,7 +70,7 @@ def build_graph_laplacian(dim: int, sparsity: int = 5,
 
     # Convert to target dtype
     if dtype.is_complex:
-        L = torch.complex(L.to_dense().float(), torch.zeros(dim, dim)).to_sparse()
+        L = safe_complex(L.to_dense().float(), torch.zeros(dim, dim)).to_sparse()
 
     return L.to(device)
 

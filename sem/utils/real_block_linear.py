@@ -23,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from torch import Tensor
+from sem.utils.complex_ops import safe_complex
 
 
 class RealBlockLinear(nn.Module):
@@ -62,12 +63,18 @@ class RealBlockLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        """Kaiming init scaled for complex circular symmetry.
+
+        For W = W_r + iW_i acting on z = z_r + iz_i:
+          Var(y) = 2·Var(W_component)·Var(z)
+        For unit output variance: Var(W_component) = 1/(2·fan_in).
+        Standard Kaiming gives 1/fan_in, so we scale by 1/√2.
         """
-        Applies Kaiming initialization to both real and imaginary components.
-        """
-        # Initialize real and imag parts independently
         nn.init.kaiming_uniform_(self.weight_real, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.weight_imag, a=math.sqrt(5))
+        # Correct for complex fan-in
+        self.weight_real.data.mul_(1.0 / math.sqrt(2.0))
+        self.weight_imag.data.mul_(1.0 / math.sqrt(2.0))
 
         if self.bias_real is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight_real)
@@ -108,4 +115,4 @@ class RealBlockLinear(nn.Module):
             yr = yr + self.bias_real
             yi = yi + self.bias_imag
 
-        return torch.complex(yr, yi)
+        return safe_complex(yr, yi)

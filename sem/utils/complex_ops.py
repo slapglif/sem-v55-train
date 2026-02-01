@@ -4,9 +4,17 @@ Provides efficient complex arithmetic primitives used throughout
 the architecture: phase extraction, magnitude, complex multiplication,
 Hermitian inner products, and real-complex conversions.
 """
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor
+
+
+def safe_complex(real: Tensor, imag: Tensor) -> Tensor:
+    if real.dtype == torch.bfloat16:
+        real = real.float()
+        imag = imag.float()
+    return torch.complex(real, imag)
 
 
 def complex_magnitude(z: Tensor) -> Tensor:
@@ -41,11 +49,12 @@ def complex_to_real_pair(z: Tensor) -> tuple[Tensor, Tensor]:
 
 def real_pair_to_complex(real: Tensor, imag: Tensor) -> Tensor:
     """Combine real and imag tensors into complex tensor."""
-    return torch.complex(real, imag)
+    return safe_complex(real, imag)
 
 
-def complex_linear(input: Tensor, weight_real: Tensor, weight_imag: Tensor,
-                    bias: Tensor | None = None) -> Tensor:
+def complex_linear(
+    input: Tensor, weight_real: Tensor, weight_imag: Tensor, bias: Tensor | None = None
+) -> Tensor:
     """Complex-valued linear projection using real weight pairs.
 
     Computes: (W_r + i*W_i)(x_r + i*x_i) = (W_r*x_r - W_i*x_i) + i*(W_r*x_i + W_i*x_r)
@@ -59,7 +68,7 @@ def complex_linear(input: Tensor, weight_real: Tensor, weight_imag: Tensor,
     x_r, x_i = input.real, input.imag
     out_r = F.linear(x_r, weight_real) - F.linear(x_i, weight_imag)
     out_i = F.linear(x_r, weight_imag) + F.linear(x_i, weight_real)
-    result = torch.complex(out_r, out_i)
+    result = safe_complex(out_r, out_i)
     if bias is not None:
         result = result + bias
     return result
@@ -69,4 +78,4 @@ def ensure_complex(x: Tensor) -> Tensor:
     """Convert real tensor to complex if needed."""
     if x.is_complex():
         return x
-    return torch.complex(x, torch.zeros_like(x))
+    return safe_complex(x, torch.zeros_like(x))

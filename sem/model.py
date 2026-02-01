@@ -71,6 +71,8 @@ class SEMModel(nn.Module):
             cg_max_iter=c.propagator.cg_max_iter,
             cg_tol=c.propagator.cg_tol,
             laplacian_sparsity=c.propagator.laplacian_sparsity,
+            lazy_cg=c.propagator.lazy_cg,
+            lazy_cg_tol=c.propagator.lazy_cg_tol,
         )
 
         # 4. Final normalization before collapse
@@ -130,7 +132,8 @@ class SEMModel(nn.Module):
             nll_term = -torch.log(target_amp_sq + 1e-12).mean()
 
             unitary_lambda = self.config.training.unitary_lambda
-            unitary_divergence = ((amp_sq.sum(dim=-1) - 1) ** 2).mean()
+            amp_sq_sum = amp_sq.sum(dim=-1)
+            unitary_divergence = (torch.log(amp_sq_sum + 1e-12) ** 2).mean()
             unitary_term = unitary_lambda * unitary_divergence
 
             loss = nll_term + unitary_term

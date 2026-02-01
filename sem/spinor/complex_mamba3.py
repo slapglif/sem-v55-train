@@ -19,6 +19,7 @@ from torch import Tensor
 from .spinor_block import SpinorGate
 from ..utils.complex_layernorm import ComplexRMSNorm
 from ..utils.fused_complex_linear import FusedComplexLinear
+from ..utils.complex_ops import safe_complex
 
 
 class ComplexSSMState(nn.Module):
@@ -28,7 +29,8 @@ class ComplexSSMState(nn.Module):
                 y_t = C * h_t
 
     where A, B, C are complex-valued and input-dependent (selective).
-    A is parameterized in log-polar form for stability: A = exp(log_a + i*theta_a).
+    A is parameterized in log-polar form with stability guarantee:
+        |A| = exp(-softplus(raw_A) * dt_mag), ensuring |A| < 1 always.
     """
 
     def __init__(self, d_input: int, state_dim: int, mimo_groups: int = 1):
@@ -45,9 +47,11 @@ class ComplexSSMState(nn.Module):
 
         # A matrix: diagonal, complex, in log-polar form
         # log_magnitude and angle are learnable
-        # Initialize with decay (negative log_mag) and diverse phases
+        # Raw A magnitude parameter (passed through -softplus for guaranteed stability)
+        # After -softplus: effective log_A_mag in [-1.31, -0.47] → |A| in [0.27, 0.63]
         self.log_A_mag = nn.Parameter(
-            -torch.rand(mimo_groups, state_dim) * 0.5 - 0.5  # log(0.3) to log(0.6)
+            torch.rand(mimo_groups, state_dim) * 0.5
+            + 0.5  # softplus(0.5..1.0) → -[0.97, 1.31]
         )
         self.A_phase = nn.Parameter(
             torch.randn(mimo_groups, state_dim) * 0.1  # Small initial phase
@@ -84,7 +88,7 @@ class ComplexSSMState(nn.Module):
         # the natural parameterization for positive timescales.
         x_real = torch.cat([x.real, x.imag], dim=-1)  # [B, S, G, 2D]
         dt_both = torch.clamp(
-            torch.exp(self.dt_proj(x_real)), min=1e-4, max=10.0
+            torch.exp(self.dt_proj(x_real)), min=1e-4, max=2.0
         )  # [B, S, G, 2]
         dt_mag = dt_both[..., :1]  # [B, S, G, 1]
         dt_phase = dt_both[..., 1:]  # [B, S, G, 1]
@@ -92,7 +96,9 @@ class ComplexSSMState(nn.Module):
         # Discretize A with independent magnitude/phase control:
         #   |A_bar| = exp(dt_mag * log_A_mag)   — memory horizon
         #   ∠A_bar = dt_phase * A_phase          — rotation speed
-        A_mag = (dt_mag * self.log_A_mag.view(1, 1, G, N)).exp()
+        # Hard-constrain log_A_mag to be negative (ensures |A| < 1 always)
+        neg_log_A = -F.softplus(self.log_A_mag.view(1, 1, G, N))  # Always negative
+        A_mag = (dt_mag * neg_log_A).exp()  # |A| = exp(dt_mag * neg_log_A) < 1 always
         A_angle = dt_phase * self.A_phase.view(1, 1, G, N)
 
         # Pre-calculate real-block isomorphism components using cos/sin to avoid complex ops
@@ -125,10 +131,18 @@ class ComplexSSMState(nn.Module):
             new_h_i = ar * h_i + ai * h_r + bi
 
             h_r, h_i = new_h_r, new_h_i
+
+            # Periodic state normalization to prevent numerical drift
+            if (t + 1) % 256 == 0:
+                h_norm = torch.sqrt(h_r * h_r + h_i * h_i + 1e-8)
+                h_scale = torch.clamp(h_norm, max=100.0) / h_norm
+                h_r = h_r * h_scale
+                h_i = h_i * h_scale
+
             all_h_r[:, t], all_h_i[:, t] = h_r, h_i
 
         # Reconstruct complex state for output projection
-        all_h = torch.complex(all_h_r, all_h_i)
+        all_h = safe_complex(all_h_r, all_h_i)
 
         # Apply C projection to all states at once (batched, fused 1 kernel)
         y = self.C_proj(all_h)  # [B, S, G, d_input]
@@ -248,7 +262,7 @@ class ComplexMamba3Layer(nn.Module):
         x_interleaved = x_interleaved.reshape(B, S, 2 * D).transpose(1, 2)  # [B, 2D, S]
         conv_out = self.conv(x_interleaved)[:, :, :S]  # [B, 2D, S]
         conv_out = conv_out.transpose(1, 2).reshape(B, S, D, 2)  # [B, S, D, 2]
-        x = torch.complex(conv_out[..., 0], conv_out[..., 1])  # [B, S, D]
+        x = safe_complex(conv_out[..., 0], conv_out[..., 1])  # [B, S, D]
 
         # SEOP Fix 12: χ²(2)-CDF magnitude gate
         # For complex Gaussian z, |z|² ~ Exp(1/2σ²). The CDF 1-exp(-|z|²·β)

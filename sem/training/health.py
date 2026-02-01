@@ -7,6 +7,7 @@ Tracks architecture invariants that standard loss curves cannot reveal:
 - CG solver convergence
 - SDR sparsity
 """
+
 import torch
 import warnings
 from torch import Tensor
@@ -24,6 +25,7 @@ from ..utils.metrics import (
 @dataclass
 class HealthReport:
     """Results from a single health check."""
+
     step: int
     unitarity_dev: float = 0.0
     phase_coherence_val: float = 0.0
@@ -31,6 +33,7 @@ class HealthReport:
     sdr_sparsity: float = 0.0
     cg_residual: float = 0.0
     grad_norm: float = 0.0
+    cg_skip_rate: float = 0.0
     has_warning: bool = False
     has_error: bool = False
     messages: List[str] = field(default_factory=list)
@@ -71,8 +74,9 @@ class HealthMonitor:
         self.history: List[HealthReport] = []
 
     @torch.no_grad()
-    def check(self, model, sample_input: Tensor, step: int,
-              grad_norm: float = 0.0) -> HealthReport:
+    def check(
+        self, model, sample_input: Tensor, step: int, grad_norm: float = 0.0
+    ) -> HealthReport:
         """Run full health check on model with a sample input.
 
         Args:
@@ -152,17 +156,20 @@ class HealthMonitor:
                     f"CG convergence warning: residual={report.cg_residual:.2e}"
                 )
 
+            # CG skip rate from lazy CG optimization
+            if hasattr(model, "propagator") and hasattr(
+                model.propagator, "cg_skip_rate"
+            ):
+                report.cg_skip_rate = model.propagator.cg_skip_rate
+                model.propagator.reset_cg_stats()
+
             # Gradient norm checks
             if grad_norm > self.grad_norm_error:
                 report.has_error = True
-                report.messages.append(
-                    f"Gradient explosion: norm={grad_norm:.2f}"
-                )
+                report.messages.append(f"Gradient explosion: norm={grad_norm:.2f}")
             elif grad_norm > self.grad_norm_warn:
                 report.has_warning = True
-                report.messages.append(
-                    f"High gradient norm: {grad_norm:.2f}"
-                )
+                report.messages.append(f"High gradient norm: {grad_norm:.2f}")
 
         finally:
             if was_training:
@@ -180,67 +187,67 @@ class HealthMonitor:
         - x = propagator output
         """
         try:
-            last_layer = model.propagator.layers[-1]
-            H = last_layer.hamiltonian.get_hamiltonian_dense()
-            D = last_layer.dim
-            I = torch.eye(D, dtype=H.dtype, device=H.device)
-            half_dt = last_layer.dt / 2
+             last_layer = model.propagator.layers[-1]
+             H = last_layer.hamiltonian.get_hamiltonian_dense()
+             D = last_layer.dim
+             I = torch.eye(D, dtype=H.dtype, device=H.device)
+             half_dt = last_layer.dt / 2
 
-            A_minus = I + 1j * half_dt * H
-            A_plus = I - 1j * half_dt * H
+             A_minus = I + 1j * half_dt * H
+             A_plus = I - 1j * half_dt * H
 
-            # Compute what the RHS should be
-            # Apply nonlinear phase rotation first
-            intensity = psi.real * psi.real + psi.imag * psi.imag
-            phase_shift = last_layer.alpha * intensity
-            psi_rot = psi * torch.exp(1j * phase_shift)
-            rhs = torch.matmul(psi_rot, A_plus.T)
+             # Compute what the RHS should be
+             # Apply nonlinear phase rotation first
+             intensity = psi.real * psi.real + psi.imag * psi.imag
+             phase_shift = last_layer.alpha * intensity
+             psi_rot = psi * torch.exp(1j * phase_shift)
+             rhs = torch.matmul(psi_rot, A_plus.T)
 
-            # Get actual output
-            x = last_layer(psi)
+             # Get actual output
+             x = last_layer(psi)
 
-            # Compute residual
-            Ax = torch.matmul(x, A_minus.T)
-            residual = (Ax - rhs).norm() / (rhs.norm() + 1e-12)
-            return residual.item()
+             # Compute residual
+             Ax = torch.matmul(x, A_minus.T)
+             residual = (Ax - rhs).norm() / (rhs.norm() + 1e-12)
+             return residual.item()
         except Exception:
-            return 0.0  # Can't compute, skip
+             return 0.0
 
     def get_metrics_dict(self) -> Dict[str, float]:
-        """Get latest health metrics as a flat dict for logging."""
-        if not self.history:
-            return {}
-        report = self.history[-1]
-        return {
-            "health/unitarity_deviation": report.unitarity_dev,
-            "health/phase_coherence": report.phase_coherence_val,
-            "health/info_density": report.info_density,
-            "health/sdr_sparsity": report.sdr_sparsity,
-            "health/cg_residual": report.cg_residual,
-            "health/grad_norm": report.grad_norm,
-        }
+         """Get latest health metrics as a flat dict for logging."""
+         if not self.history:
+             return {}
+         report = self.history[-1]
+         return {
+             "health/unitarity_deviation": report.unitarity_dev,
+             "health/phase_coherence": report.phase_coherence_val,
+             "health/info_density": report.info_density,
+             "health/sdr_sparsity": report.sdr_sparsity,
+             "health/cg_residual": report.cg_residual,
+             "health/grad_norm": report.grad_norm,
+             "health/cg_skip_rate": report.cg_skip_rate,
+         }
 
     def state_dict(self) -> dict:
-        """Serialize for checkpointing (keep last 100 reports)."""
-        return {
-            "history": [
-                {
-                    "step": r.step,
-                    "unitarity_dev": r.unitarity_dev,
-                    "phase_coherence_val": r.phase_coherence_val,
-                    "info_density": r.info_density,
-                    "sdr_sparsity": r.sdr_sparsity,
-                    "cg_residual": r.cg_residual,
-                    "grad_norm": r.grad_norm,
-                    "has_warning": r.has_warning,
-                    "has_error": r.has_error,
-                    "messages": r.messages,
-                }
-                for r in self.history[-100:]
-            ]
-        }
+         """Serialize for checkpointing (keep last 100 reports)."""
+         return {
+             "history": [
+                 {
+                     "step": r.step,
+                     "unitarity_dev": r.unitarity_dev,
+                     "phase_coherence_val": r.phase_coherence_val,
+                     "info_density": r.info_density,
+                     "sdr_sparsity": r.sdr_sparsity,
+                     "cg_residual": r.cg_residual,
+                     "grad_norm": r.grad_norm,
+                     "cg_skip_rate": r.cg_skip_rate,
+                     "has_warning": r.has_warning,
+                     "has_error": r.has_error,
+                     "messages": r.messages,
+                 }
+                 for r in self.history[-100:]
+             ]
+         }
 
     def load_state_dict(self, state: dict):
-        self.history = [
-            HealthReport(**r) for r in state.get("history", [])
-        ]
+        self.history = [HealthReport(**r) for r in state.get("history", [])]

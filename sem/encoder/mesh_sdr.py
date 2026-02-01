@@ -19,6 +19,7 @@ from typing import Optional
 
 from .sinkhorn import LogSinkhorn
 from .cost_matrix import LearnedCostMatrix
+from sem.utils.complex_ops import safe_complex
 
 
 class MESHEncoder(nn.Module):
@@ -135,6 +136,6 @@ class MESHEncoder(nn.Module):
 
         z_real = sdr * cos
         z_imag = sdr * sin
-        z = torch.complex(z_real, z_imag)
+        z = safe_complex(z_real, z_imag)
 
         return z  # [B, S, D] complex64

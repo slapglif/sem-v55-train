@@ -1,4 +1,4 @@
-"""Block-diagonal spinor factorization.
+"""Block-diagonal spinor factorization with Real-Block Isomorphism.
 
 Implements the spinor representation as block-diagonal complex matrices.
 Instead of a dense D×D complex matrix (O(D^2)), we use num_blocks
@@ -11,44 +11,65 @@ For D=256, block_size=8, num_blocks=32:
 
 The blocks maintain non-commutative geometric (spinor) properties
 because each block acts as an independent SU(block_size) rotation.
+
+[MISMATCH] Previous version stored weights as complex64 nn.Parameter,
+breaking torch.compile (inductor can't codegen complex ops) and
+missing ComplexAdamW _complex_partner coupling. The forward() already
+decomposed into real/imag for einsum — weight storage was the only
+complex64 holdout.
+
+[DERIVATION] Store weight_real, weight_imag as separate float32 params.
+The block_diagonal_complex_matmul already accepts .real/.imag decomposition.
 """
+
 import torch
 import torch.nn as nn
 import math
 from torch import Tensor
 
-from .complex_ops import block_diagonal_complex_matmul
+from sem.utils.complex_ops import safe_complex
+
+# block_diagonal_complex_matmul no longer needed — einsum done inline with real-block params
 
 
 class SpinorBlock(nn.Module):
     """Block-diagonal spinor transformation layer.
 
     Factorizes a D×D complex transform into num_blocks independent
-    block_size×block_size complex rotations.
+    block_size×block_size complex rotations, stored as float32 pairs.
     """
 
     def __init__(self, hidden_dim: int, block_size: int = 8):
         super().__init__()
-        assert hidden_dim % block_size == 0, \
+        assert hidden_dim % block_size == 0, (
             f"hidden_dim {hidden_dim} must be divisible by block_size {block_size}"
+        )
 
         self.hidden_dim = hidden_dim
         self.block_size = block_size
         self.num_blocks = hidden_dim // block_size
 
-        # Initialize block weights as near-identity complex rotations
-        # Real part: identity + small noise
-        # Imag part: small antisymmetric (for near-unitary init)
+        # Real-block storage (float32, compile-friendly)
         weight_real = torch.zeros(self.num_blocks, block_size, block_size)
         weight_imag = torch.zeros(self.num_blocks, block_size, block_size)
 
         for b in range(self.num_blocks):
-            weight_real[b] = torch.eye(block_size) + torch.randn(block_size, block_size) * 0.02
+            # Near-identity init: real part = I + noise
+            weight_real[b] = (
+                torch.eye(block_size) + torch.randn(block_size, block_size) * 0.02
+            )
             # Antisymmetric imaginary part for near-unitary initialization
             skew = torch.randn(block_size, block_size) * 0.02
             weight_imag[b] = skew - skew.T
 
-        self.weight = nn.Parameter(torch.complex(weight_real, weight_imag))
+        self.weight_real = nn.Parameter(weight_real)
+        self.weight_imag = nn.Parameter(weight_imag)
+
+        # Tag for ComplexAdamW coupled momentum
+        self.weight_real._is_complex_real = True  # type: ignore[attr-defined]
+        self.weight_imag._is_complex_imag = True  # type: ignore[attr-defined]
+        self.weight_real._complex_partner = self.weight_imag  # type: ignore[attr-defined]
+        self.weight_imag._complex_partner = self.weight_real  # type: ignore[attr-defined]
 
     def forward(self, x: Tensor) -> Tensor:
         """Apply block-diagonal spinor rotation.
@@ -63,11 +84,23 @@ class SpinorBlock(nn.Module):
         # Reshape to blocks: [B, S, num_blocks, block_size]
         x_blocks = x.view(B, S, self.num_blocks, self.block_size)
 
-        # Block-diagonal matmul: O(num_blocks * block_size^2) per token
-        out_blocks = block_diagonal_complex_matmul(x_blocks, self.weight)
+        # Decompose input
+        xr, xi = x_blocks.real, x_blocks.imag
+        br, bi = self.weight_real, self.weight_imag
+
+        # Block-diagonal complex matmul via Real-Block Isomorphism
+        # (br + i·bi) @ (xr + i·xi) = (br@xr - bi@xi) + i·(br@xi + bi@xr)
+        out_real = torch.einsum("noi,bsni->bsno", br, xr) - torch.einsum(
+            "noi,bsni->bsno", bi, xi
+        )
+        out_imag = torch.einsum("noi,bsni->bsno", br, xi) + torch.einsum(
+            "noi,bsni->bsno", bi, xr
+        )
+
+        out = safe_complex(out_real, out_imag)
 
         # Reshape back: [B, S, D]
-        return out_blocks.reshape(B, S, D)
+        return out.reshape(B, S, D)
 
 
 class SpinorGate(nn.Module):

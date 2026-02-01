@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from sem.utils.complex_ops import safe_complex
+
 
 def block_diagonal_complex_matmul(x: Tensor, blocks: Tensor) -> Tensor:
     """Block-diagonal complex matrix-vector multiplication.
@@ -37,7 +39,7 @@ def block_diagonal_complex_matmul(x: Tensor, blocks: Tensor) -> Tensor:
         "noi,bsni->bsno", bi, xr
     )
 
-    return torch.complex(out_real, out_imag)
+    return safe_complex(out_real, out_imag)
 
 
 def complex_mul_real(
@@ -72,4 +74,4 @@ def complex_selective_gate(x: Tensor, gate: Tensor) -> Tensor:
     """
     xr, xi = x.real, x.imag
     g = gate.to(xr.dtype)
-    return torch.complex(xr * g, xi * g)
+    return safe_complex(xr * g, xi * g)

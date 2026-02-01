@@ -40,6 +40,8 @@ class PropagatorConfig:
     cg_tol: float = 1e-6
     nonlinear_alpha: float = 0.1
     laplacian_sparsity: int = 5
+    lazy_cg: bool = True
+    lazy_cg_tol: float = 1e-6  # Residual gate tolerance for lazy CG
 
 
 @dataclass
@@ -83,8 +85,8 @@ class TrainingConfig:
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
     tokenizer_path: str = "tokenizer/"
-    num_workers: int = 4
-    shuffle_buffer_size: int = 10000
+    num_workers: int = 0
+    shuffle_buffer_size: int = 1000
 
     # WSD Scheduler
     scheduler_type: str = "wsd"
@@ -95,6 +97,14 @@ class TrainingConfig:
     # wandb
     wandb_project: str = "sem-v55-lean-crystal"
     wandb_enabled: bool = True
+
+    # Timing and profiling
+    timing_enabled: bool = False
+    timing_log_interval: int = 10
+
+    no_compile: bool = False
+    compile_mode: str = "default"
+    no_amp: bool = False
 
 
 @dataclass

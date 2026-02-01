@@ -8,6 +8,7 @@ encoded in the phase.
 
 import torch
 import torch.nn as nn
+from sem.utils.complex_ops import safe_complex
 from torch import Tensor
 
 
@@ -76,4 +77,4 @@ class ComplexRMSNorm(nn.Module):
         # Real-math normalization to bypass complex division/multiplication on XPU
         # scale is real-valued, shape (..., dim)
         scale = self.gamma / (rms + self.eps)
-        return torch.complex(z.real * scale, z.imag * scale)
+        return safe_complex(z.real * scale, z.imag * scale)

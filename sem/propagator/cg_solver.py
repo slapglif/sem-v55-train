@@ -15,6 +15,8 @@ from torch import Tensor
 from torch.autograd import Function
 from typing import Optional, Callable, Any, cast
 
+_last_cg_iterations: int = 0
+
 
 class CGSolverFunction(Function):
     """Custom autograd Function for CG solver with implicit differentiation."""
@@ -113,7 +115,10 @@ def _cg_solve(
     rz_old = (r * z).sum(dim=(-2, -1), keepdim=True)
     b_norm = torch.norm(b_real, dim=(-2, -1), keepdim=True) + 1e-12
 
+    global _last_cg_iterations
+    iters_done = 0
     for _ in range(max_iter):
+        iters_done += 1
         Ap = matvec(p)
         pAp = (p * Ap).sum(dim=(-2, -1), keepdim=True)
         alpha = rz_old / (pAp + 1e-12)
@@ -131,6 +136,7 @@ def _cg_solve(
         p = z + beta * p
         rz_old = rz_new
 
+    _last_cg_iterations = iters_done
     return torch.view_as_complex(x) if is_complex else x
 
 

@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from torch import Tensor
+from sem.utils.complex_ops import safe_complex
 
 
 class GraphLaplacianHamiltonian(nn.Module):
@@ -47,6 +48,7 @@ class GraphLaplacianHamiltonian(nn.Module):
         self.edge_weights = nn.Parameter(torch.randn(num_edges) * 0.1)
         self._cached_w = None
         self._cached_degree = None
+        self._cached_dense_A = None
 
     def _build_sparsity_pattern(self, dim: int, sparsity: int) -> Tensor:
         """Build small-world sparsity pattern.
@@ -125,11 +127,21 @@ class GraphLaplacianHamiltonian(nn.Module):
         degree.scatter_add_(0, rows, self._cached_w)
         degree.scatter_add_(0, cols, self._cached_w)
         self._cached_degree = degree
+        D = self.dim
+        device = self._cached_w.device
+        if D <= 512 or device.type == "xpu":
+            A_dense = torch.zeros(D, D, device=device, dtype=self._cached_w.dtype)
+            A_dense[rows, cols] = self._cached_w
+            A_dense[cols, rows] = self._cached_w
+            self._cached_dense_A = A_dense
+        else:
+            self._cached_dense_A = None
 
     def clear_cache(self):
         """Clear cached weights."""
         self._cached_w = None
         self._cached_degree = None
+        self._cached_dense_A = None
 
     def get_diagonal(self) -> Tensor:
         """Get diagonal of Laplacian H: diag(H) = degree vector.
@@ -186,11 +198,19 @@ class GraphLaplacianHamiltonian(nn.Module):
         batch_shape = v.shape[:-1]
         v_flat = v.reshape(-1, D)  # [B*S, D]
 
-        # Build sparse matrix and multiply
-        A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
-        Av_flat = torch.sparse.mm(A_sparse, v_flat.t()).t()  # [B*S, D]
+        # Dense matmul for small D or XPU (sparse.mm not supported on XPU)
+        if D <= 512 or device.type == "xpu":
+            if self._cached_dense_A is not None:
+                A_dense = self._cached_dense_A
+            else:
+                A_dense = torch.zeros(D, D, device=device, dtype=w.dtype)
+                A_dense[rows, cols] = w
+                A_dense[cols, rows] = w
+            Av_flat = v_flat @ A_dense.t()
+        else:
+            A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
+            Av_flat = torch.sparse.mm(A_sparse, v_flat.t()).t()
 
-        # Reshape back
         res = Av_flat.reshape(*batch_shape, D)
 
         if self._cached_degree is not None:
@@ -201,6 +221,67 @@ class GraphLaplacianHamiltonian(nn.Module):
             degree.scatter_add_(0, cols, w)
 
         return degree * v - res
+
+    def matvec_real_fused(self, vr: Tensor, vi: Tensor) -> tuple[Tensor, Tensor]:
+        """Compute H @ v for real tensors with a fused sparse matvec.
+
+        H = D - A where A is sparse adjacency.
+        (H @ v)_i = degree_i * v_i - sum_{j in neighbors(i)} w_ij * v_j
+
+        O(sparsity * D) instead of O(D^2).
+
+        Args:
+            vr: [..., D] real tensor
+            vi: [..., D] real tensor
+        Returns:
+            Hvr: [..., D] real tensor
+            Hvi: [..., D] real tensor
+        """
+        # SEOP Fix 23: Fuse real/imag matvecs to halve sparse.mm launches and reuse A.
+        w = (
+            self._cached_w
+            if self._cached_w is not None
+            else F.softplus(self.edge_weights)
+        )
+        rows, cols = self.edge_indices[0], self.edge_indices[1]
+
+        D = self.dim
+        device = w.device
+
+        batch_shape = vr.shape[:-1]
+        vr_flat = vr.reshape(-1, D)
+        vi_flat = vi.reshape(-1, D)
+        v_combined = torch.cat([vr_flat, vi_flat], dim=0)
+
+        if D <= 512 or device.type == "xpu":
+            if self._cached_dense_A is not None:
+                A_dense = self._cached_dense_A
+            else:
+                A_dense = torch.zeros(D, D, device=device, dtype=w.dtype)
+                A_dense[rows, cols] = w
+                A_dense[cols, rows] = w
+            Av_combined = v_combined @ A_dense.t()
+        else:
+            idx = torch.cat(
+                [torch.stack([rows, cols]), torch.stack([cols, rows])], dim=1
+            )
+            w_sym = torch.cat([w, w])
+            A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
+            Av_combined = torch.sparse.mm(A_sparse, v_combined.t()).t()
+
+        Avr_flat, Avi_flat = Av_combined.split(vr_flat.shape[0], dim=0)
+
+        Avr = Avr_flat.reshape(*batch_shape, D)
+        Avi = Avi_flat.reshape(*batch_shape, D)
+
+        if self._cached_degree is not None:
+            degree = self._cached_degree
+        else:
+            degree = torch.zeros(self.dim, device=w.device)
+            degree.scatter_add_(0, rows, w)
+            degree.scatter_add_(0, cols, w)
+
+        return degree * vr - Avr, degree * vi - Avi
 
     def matvec(self, v: Tensor) -> Tensor:
         """Compute H @ v using sparse Laplacian structure.
@@ -216,7 +297,7 @@ class GraphLaplacianHamiltonian(nn.Module):
             Hv: [..., D] complex64
         """
         # XPU Refactor: Use explicit real matvecs
-        return torch.complex(self.matvec_real(v.real), self.matvec_real(v.imag))
+        return safe_complex(self.matvec_real(v.real), self.matvec_real(v.imag))
 
 
 class MultiScaleHamiltonian(nn.Module):
@@ -293,6 +374,21 @@ class MultiScaleHamiltonian(nn.Module):
         terms = [w * scale.matvec_real(v) for w, scale in zip(weights, self.scales)]
         return torch.stack(terms).sum(dim=0)
 
+    def matvec_real_fused(self, vr: Tensor, vi: Tensor) -> tuple[Tensor, Tensor]:
+        """Multi-scale H @ v for fused real tensors."""
+        # SEOP Fix 23: Fuse real/imag passes per scale to avoid duplicate sparse.mm.
+        weights = (
+            self._cached_scale_weights
+            if self._cached_scale_weights is not None
+            else torch.softmax(self.scale_weights, dim=0)
+        )
+        terms_r, terms_i = [], []
+        for w, scale in zip(weights, self.scales):
+            Hvr, Hvi = scale.matvec_real_fused(vr, vi)
+            terms_r.append(w * Hvr)
+            terms_i.append(w * Hvi)
+        return torch.stack(terms_r).sum(dim=0), torch.stack(terms_i).sum(dim=0)
+
     def matvec(self, v: Tensor) -> Tensor:
         """Multi-scale H @ v for complex tensors."""
-        return torch.complex(self.matvec_real(v.real), self.matvec_real(v.imag))
+        return safe_complex(self.matvec_real(v.real), self.matvec_real(v.imag))

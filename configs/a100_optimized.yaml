@@ -1,0 +1,94 @@
+# SEM V5.5 "Lean Crystal" - A100/H100 80GB Maximum Throughput
+# bf16 AMP + torch.compile(max-autotune) + gradient checkpointing
+# Born sampler [B*S, 256]->[B*S, 32768] is VRAM bottleneck (~17GB at B=32,S=2048)
+# Expected: ~30-50k tok/s on A100, ~60-80k tok/s on H100
+
+model:
+  hidden_dim: 256
+  num_layers: 8
+  vocab_size: 32768
+  max_seq_length: 2048
+
+encoder:
+  sdr_sparsity: 32
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.05
+  sinkhorn_max_iter: 30
+  sinkhorn_tol: 1.0e-3
+
+spinor:
+  block_size: 8
+  num_blocks: 32
+  state_dim: 64
+  mimo_groups: 8
+  d_conv: 4
+
+propagator:
+  cayley_dt: 0.1
+  cg_max_iter: 5
+  cg_tol: 1.0e-6
+  nonlinear_alpha: 0.1
+  laplacian_sparsity: 5
+  lazy_cg: true
+  lazy_cg_tol: 1.0e-6
+
+quantizer:
+  codebook_size: 256
+  group_size: 2
+  fisher_ema_decay: 0.99
+  outlier_percentile: 0.01
+  dead_code_threshold: 100
+
+sampler:
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+training:
+  batch_size: 512
+  micro_batch_size: 32
+  gradient_checkpointing: true
+  dtype: float32
+  learning_rate: 6.0e-4
+  weight_decay: 0.01
+  warmup_steps: 2000
+  max_steps: 100000
+  gradient_clip: 1.0
+  dataset_name: "HuggingFaceFW/fineweb-edu"
+  tokenizer_path: "tokenizer/"
+  num_workers: 8
+  shuffle_buffer_size: 50000
+  scheduler_type: "wsd"
+  stable_steps: 0
+  decay_steps: 10000
+  lr_min_ratio: 0.1
+  log_interval: 10
+  health_check_interval: 500
+  checkpoint_interval: 2000
+  keep_checkpoints: 5
+  wandb_project: "sem-v55-a100"
+  wandb_enabled: true
+  timing_enabled: true
+  timing_log_interval: 50
+
+curriculum:
+  enabled: true
+  stages:
+    - min_score: 2
+      seq_len: 1024
+      min_steps: 20000
+    - min_score: 3
+      seq_len: 2048
+      min_steps: 40000
+    - min_score: 3
+      seq_len: 2048
+      min_steps: 40000
+
+distillation:
+  enabled: true
+  alpha: 0.5
+  ema_decay_start: 0.999
+  ema_decay_end: 0.9999
+  ema_decay_ramp_steps: 10000
+  enable_at_stage: 1
+  temperature: 2.0

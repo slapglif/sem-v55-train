@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import math
 import logging
+import time
 from pathlib import Path
 from typing import Optional, Dict
 from dataclasses import asdict
@@ -27,6 +28,14 @@ from .health import HealthMonitor
 from .callbacks import WandbCallback, ConsoleCallback
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_and_time(device_type: str) -> float:
+    if device_type == "cuda":
+        torch.cuda.synchronize()
+    elif device_type == "xpu":
+        torch.xpu.synchronize()
+    return time.perf_counter()
 
 
 class SEMTrainer:
@@ -58,22 +67,52 @@ class SEMTrainer:
             f"Parameters: {param_counts['total']['effective_real']:,} effective real"
         )
 
-        # torch.compile disabled for XPU - requires C++ compiler for Triton kernels
-        # CPU still uses torch.compile for oneDNN optimization
-        if self.device.type == "cpu" and not self.dry_run:
-            try:
-                self.model = torch.compile(
-                    self.model,
-                    backend="inductor",
-                    mode="reduce-overhead",
-                )
-                logger.info(
-                    f"torch.compile enabled for CPU (Inductor, reduce-overhead)"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"torch.compile failed for CPU, falling back to eager: {e}"
-                )
+        self._use_amp = False
+        self._amp_dtype = torch.float32
+        self._grad_scaler = None
+        no_compile = getattr(config.training, "no_compile", False)
+        compile_mode = getattr(config.training, "compile_mode", "default")
+
+        if self.device.type == "cuda":
+            if not no_compile:
+                try:
+                    self.model = torch.compile(
+                        self.model,
+                        backend="inductor",
+                        mode=compile_mode,
+                    )
+                    logger.info(f"torch.compile enabled for CUDA ({compile_mode})")
+                except Exception as e:
+                    logger.warning(f"torch.compile failed for CUDA: {e}")
+            else:
+                logger.info("torch.compile disabled (--no-compile)")
+            no_amp = getattr(config.training, "no_amp", False)
+            if no_amp:
+                logger.info("AMP disabled (--no-amp)")
+            elif torch.cuda.is_bf16_supported():
+                self._use_amp = True
+                self._amp_dtype = torch.bfloat16
+                logger.info("AMP enabled with bf16 (native tensor core support)")
+            else:
+                self._use_amp = True
+                self._amp_dtype = torch.float16
+                logger.info("AMP enabled with fp16")
+            self._grad_scaler = (
+                torch.cuda.amp.GradScaler()
+                if self._amp_dtype == torch.float16
+                else None
+            )
+        elif self.device.type == "cpu" and not self.dry_run:
+            if not no_compile:
+                try:
+                    self.model = torch.compile(
+                        self.model,
+                        backend="inductor",
+                        mode="reduce-overhead",
+                    )
+                    logger.info("torch.compile enabled for CPU (reduce-overhead)")
+                except Exception as e:
+                    logger.warning(f"torch.compile failed for CPU: {e}")
         elif self.device.type == "xpu":
             logger.info("torch.compile disabled for XPU (eager mode)")
 
@@ -139,16 +178,16 @@ class SEMTrainer:
             config=asdict(config) if config.training.wandb_enabled else None,
             enabled=config.training.wandb_enabled,
         )
-        self.console_cb = ConsoleCallback(log_interval=config.training.log_interval)
+        self.console_cb = ConsoleCallback(
+            log_interval=config.training.log_interval,
+            timing_log_interval=config.training.timing_log_interval,
+        )
 
-        # Tokenizer (skip in dry-run mode — use synthetic data instead)
-        self.tokenizer = None
-        if not self.dry_run:
-            self.tokenizer = SEMTokenizer(config.training.tokenizer_path)
-            assert self.tokenizer.vocab_size == config.model.vocab_size, (
-                f"Tokenizer vocab {self.tokenizer.vocab_size} != "
-                f"model vocab {config.model.vocab_size}"
-            )
+        self.tokenizer = SEMTokenizer(config.training.tokenizer_path)
+        assert self.tokenizer.vocab_size == config.model.vocab_size, (
+            f"Tokenizer vocab {self.tokenizer.vocab_size} != "
+            f"model vocab {config.model.vocab_size}"
+        )
 
         # Resume from checkpoint
         if resume_from:
@@ -212,9 +251,6 @@ class SEMTrainer:
             else self.config.model.max_seq_length
         )
 
-        if self.dry_run:
-            return self._build_synthetic_dataloader(seq_len)
-
         min_score = self.curriculum.min_score if self.curriculum else 2
 
         dataset = PackedStreamingDataset(
@@ -223,6 +259,7 @@ class SEMTrainer:
             min_score=min_score,
             shuffle_buffer=self.config.training.shuffle_buffer_size,
             dataset_name=self.config.training.dataset_name,
+            timing_enabled=self.config.training.timing_enabled,
         )
 
         return dataset.create_dataloader(
@@ -264,6 +301,31 @@ class SEMTrainer:
             decay_ramp_steps=self.config.distillation.ema_decay_ramp_steps,
         ).to(self.device)
 
+    def _auto_scale_micro_batch(self, new_seq_len: int):
+        """Scale micro_batch inversely with seq_len to stay within VRAM budget.
+
+        Uses the VRAM/token-slot ratio from the first stage to predict memory
+        at new seq_len, then picks the largest micro_batch that fits.
+        """
+        if not hasattr(self, "_vram_per_token_slot"):
+            return
+        c = self.config.training
+        if self.device.type == "cuda":
+            total_vram = torch.cuda.get_device_properties(0).total_mem
+        else:
+            return
+        target_vram = int(total_vram * 0.85)
+        new_micro = max(1, target_vram // (self._vram_per_token_slot * new_seq_len))
+        new_micro = min(new_micro, c.batch_size)
+        while c.batch_size % new_micro != 0 and new_micro > 1:
+            new_micro -= 1
+        old_micro = c.micro_batch_size
+        c.micro_batch_size = new_micro
+        logger.info(
+            f"[AUTO-SCALE] seq_len {new_seq_len}: micro_batch {old_micro} -> {new_micro} "
+            f"(accum={c.batch_size // new_micro})"
+        )
+
     def _handle_stage_transition(self):
         """Handle curriculum stage transition."""
         old_stage = self.curriculum.current_stage
@@ -273,7 +335,6 @@ class SEMTrainer:
             old_stage, self.curriculum.current_stage, self.global_step
         )
 
-        # Save stage transition checkpoint
         self.checkpoint_mgr.save(
             model=self.model,
             optimizer=self.optimizer,
@@ -287,25 +348,27 @@ class SEMTrainer:
             is_stage_transition=True,
         )
 
-        # Reset scheduler with decayed LR
         for param_group in self.optimizer.param_groups:
             param_group["lr"] *= self.curriculum.lr_decay_per_stage
         self.scheduler.reset(new_warmup_steps=self.curriculum.stage_warmup_steps)
 
-        # Maybe start distillation
+        self._auto_scale_micro_batch(self.curriculum.seq_len)
+
         self._maybe_init_distillation()
 
-        # Clean cache after stage transition
-        if self.device.type == "xpu":
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+            logger.info("CUDA cache cleared after stage transition")
+        elif self.device.type == "xpu":
             torch.xpu.empty_cache()
             logger.info("XPU cache cleared after stage transition")
 
-        # Log
         self.wandb_cb.log(
             {
                 "curriculum/stage": self.curriculum.current_stage,
                 "curriculum/seq_len": self.curriculum.seq_len,
                 "curriculum/min_score": self.curriculum.min_score,
+                "curriculum/micro_batch": self.config.training.micro_batch_size,
             },
             step=self.global_step,
         )
@@ -313,8 +376,8 @@ class SEMTrainer:
     def train(self):
         """Main training loop."""
         c = self.config.training
-        accum_steps = c.batch_size // c.micro_batch_size
 
+        accum_steps = c.batch_size // c.micro_batch_size
         logger.info(f"SEM V5.5 'Lean Crystal' Training")
         logger.info(f"Device: {self.device}")
         logger.info(
@@ -330,6 +393,12 @@ class SEMTrainer:
             )
 
         self.model.train()
+        if (
+            c.timing_enabled
+            and hasattr(self.model, "propagator")
+            and self.device.type != "cuda"
+        ):
+            self.model.propagator.set_timing(True)
         logger.info("[TRAIN] Building dataloader...")
         dataloader = self._build_dataloader()
         logger.info("[TRAIN] Creating data iterator...")
@@ -341,78 +410,203 @@ class SEMTrainer:
         logger.info(f"[TRAIN] Starting training loop (max_steps={c.max_steps})...")
         logger.info("=" * 60)
 
+        compile_warmup_done = False
+
         while self.global_step < c.max_steps:
+            accum_steps = c.batch_size // c.micro_batch_size
             self.console_cb.on_step_start()
             step_loss = 0.0
             step_unitary_divergence = 0.0
             step_metrics = {}
+            timings = {}
+            current_phase = "init"
 
-            # Gradient accumulation loop
-            for accum_idx in range(accum_steps):
-                if self.global_step == 0 and accum_idx == 0:
-                    logger.info("[TRAIN] Loading first batch...")
+            try:
+                t_step_start = _sync_and_time(self.device.type)
 
-                try:
-                    batch = next(data_iter)
+                # Gradient accumulation loop
+                for accum_idx in range(accum_steps):
+                    current_phase = "batch_load"
                     if self.global_step == 0 and accum_idx == 0:
-                        logger.info("[TRAIN] First batch loaded successfully!")
-                except StopIteration:
-                    # Rebuild dataloader (streaming reset)
-                    dataloader = self._build_dataloader()
-                    data_iter = iter(dataloader)
-                    batch = next(data_iter)
+                        logger.info("[TRAIN] Loading first batch...")
 
-                token_ids, token_freqs = batch
-                token_ids = token_ids.to(self.device)
-                token_freqs = token_freqs.to(self.device)
+                    t_batch_start = time.perf_counter()
+                    try:
+                        batch = next(data_iter)
+                        if self.global_step == 0 and accum_idx == 0:
+                            logger.info("[TRAIN] First batch loaded successfully!")
+                    except StopIteration:
+                        dataloader = self._build_dataloader()
+                        data_iter = iter(dataloader)
+                        batch = next(data_iter)
+                    t_batch_end = time.perf_counter()
 
-                # Forward pass
-                output = self.model(
-                    token_ids, targets=token_ids, token_freqs=token_freqs
-                )
+                    current_phase = "device_transfer"
+                    t_transfer_start = time.perf_counter()
+                    token_ids, token_freqs = batch
+                    token_ids = token_ids.to(self.device)
+                    token_freqs = token_freqs.to(self.device)
+                    t_transfer_end = _sync_and_time(self.device.type)
 
-                # Loss computation
-                if self.ema_teacher is not None and self.distillation_loss is not None:
-                    loss, dist_metrics = self.distillation_loss.compute(
-                        output,
-                        self.ema_teacher.teacher,
-                        token_ids,
-                        token_ids,
-                        token_freqs=token_freqs,
+                    current_phase = "forward"
+                    t_forward_start = _sync_and_time(self.device.type)
+                    amp_ctx = (
+                        torch.amp.autocast(self.device.type, dtype=self._amp_dtype)
+                        if self._use_amp
+                        else torch.amp.autocast(self.device.type, enabled=False)
                     )
-                    step_metrics.update(dist_metrics)
+                    with amp_ctx:
+                        output = self.model(
+                            token_ids, targets=token_ids, token_freqs=token_freqs
+                        )
+                    t_forward_end = _sync_and_time(self.device.type)
+
+                    current_phase = "loss_compute"
+                    t_loss_start = time.perf_counter()
+                    if (
+                        self.ema_teacher is not None
+                        and self.distillation_loss is not None
+                    ):
+                        loss, dist_metrics = self.distillation_loss.compute(
+                            output,
+                            self.ema_teacher.teacher,
+                            token_ids,
+                            token_ids,
+                            token_freqs=token_freqs,
+                        )
+                        step_metrics.update(dist_metrics)
+                    else:
+                        loss = output["loss"]
+                    t_loss_end = _sync_and_time(self.device.type)
+
+                    current_phase = "backward"
+                    t_backward_start = time.perf_counter()
+                    scaled_loss = loss / accum_steps
+                    if self._grad_scaler is not None:
+                        self._grad_scaler.scale(scaled_loss).backward()
+                    else:
+                        scaled_loss.backward()
+                    t_backward_end = _sync_and_time(self.device.type)
+
+                    step_loss += loss.item() / accum_steps
+                    if "unitary_divergence" in output:
+                        step_unitary_divergence += (
+                            output["unitary_divergence"].item() / accum_steps
+                        )
+                    micro_step += 1
+
+                    if c.timing_enabled:
+                        timings.setdefault("batch_load", []).append(
+                            t_batch_end - t_batch_start
+                        )
+                        timings.setdefault("device_transfer", []).append(
+                            t_transfer_end - t_transfer_start
+                        )
+                        timings.setdefault("forward", []).append(
+                            t_forward_end - t_forward_start
+                        )
+                        timings.setdefault("loss_compute", []).append(
+                            t_loss_end - t_loss_start
+                        )
+                        timings.setdefault("backward", []).append(
+                            t_backward_end - t_backward_start
+                        )
+                        if hasattr(self.model, "propagator"):
+                            prop_t = self.model.propagator.collect_and_clear_timing()
+                            prop_agg = timings.setdefault("propagator", {})
+                            for k, v in prop_t.items():
+                                if isinstance(v, list):
+                                    prop_agg.setdefault(k, []).extend(v)
+                                else:
+                                    prop_agg[k] = prop_agg.get(k, 0) + v
+
+                current_phase = "grad_clip"
+                t_clip_start = _sync_and_time(self.device.type)
+                if self._grad_scaler is not None:
+                    self._grad_scaler.unscale_(self.optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), c.gradient_clip
+                ).item()
+                t_clip_end = _sync_and_time(self.device.type)
+
+                current_phase = "fisher_update"
+                t_fisher_start = time.perf_counter()
+                self.quantizer.update_fisher(self.model)
+                t_fisher_end = _sync_and_time(self.device.type)
+
+                current_phase = "optimizer_step"
+                t_optim_start = time.perf_counter()
+                if self._grad_scaler is not None:
+                    self._grad_scaler.step(self.optimizer)
+                    self._grad_scaler.update()
                 else:
-                    loss = output["loss"]
+                    self.optimizer.step()
+                self.optimizer.zero_grad()
+                self.scheduler.step()
+                t_optim_end = _sync_and_time(self.device.type)
 
-                # Scale loss for gradient accumulation
-                scaled_loss = loss / accum_steps
-                scaled_loss.backward()
+                current_phase = "ema_update"
+                t_ema_start = time.perf_counter()
+                if self.ema_teacher is not None:
+                    self.ema_teacher.update(self.model)
+                t_ema_end = time.perf_counter()
 
-                step_loss += loss.item() / accum_steps
-                if "unitary_divergence" in output:
-                    step_unitary_divergence += (
-                        output["unitary_divergence"].item() / accum_steps
+                if c.timing_enabled:
+                    timings["grad_clip"] = t_clip_end - t_clip_start
+                    timings["fisher_update"] = t_fisher_end - t_fisher_start
+                    timings["optimizer_step"] = t_optim_end - t_optim_start
+                    timings["ema_update"] = (
+                        t_ema_end - t_ema_start if self.ema_teacher else 0.0
                     )
-                micro_step += 1
+                    timings["step_total"] = (
+                        _sync_and_time(self.device.type) - t_step_start
+                    )
 
-            # Gradient clipping
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), c.gradient_clip
-            ).item()
+                if c.timing_enabled and self.device.type == "cuda":
+                    timings["vram_allocated_mb"] = (
+                        torch.cuda.memory_allocated() / 1024**2
+                    )
+                    timings["vram_reserved_mb"] = torch.cuda.memory_reserved() / 1024**2
+                    timings["vram_peak_mb"] = (
+                        torch.cuda.max_memory_allocated() / 1024**2
+                    )
 
-            # Fisher tracker update (after clipping to avoid corrupted estimates from gradient spikes)
-            self.quantizer.update_fisher(self.model)
+                if (
+                    not hasattr(self, "_vram_per_token_slot")
+                    and self.device.type == "cuda"
+                ):
+                    peak = torch.cuda.max_memory_allocated()
+                    seq_len = (
+                        self.curriculum.seq_len
+                        if self.curriculum
+                        else self.config.model.max_seq_length
+                    )
+                    token_slots = c.micro_batch_size * seq_len
+                    if token_slots > 0:
+                        self._vram_per_token_slot = int(peak / token_slots)
+                        logger.info(
+                            f"[VRAM] Measured {peak / 1024**2:.0f}MB peak for "
+                            f"{c.micro_batch_size}x{seq_len} = "
+                            f"{self._vram_per_token_slot} bytes/token-slot"
+                        )
 
-            # Optimizer step
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-            self.scheduler.step()
+                self.global_step += 1
+                current_phase = "metrics"
 
-            # EMA teacher update
-            if self.ema_teacher is not None:
-                self.ema_teacher.update(self.model)
+                if not compile_warmup_done and self.global_step == 1:
+                    compile_warmup_done = True
+                    if c.timing_enabled:
+                        logger.info(
+                            f"[COMPILE] First step (includes compile warmup): {timings.get('step_total', 0) * 1000:.0f}ms"
+                        )
 
-            self.global_step += 1
+            except Exception as e:
+                logger.error(
+                    f"[TRAIN] Exception during phase '{current_phase}' at step {self.global_step}"
+                )
+                if c.timing_enabled and timings:
+                    logger.error(f"[TRAIN] Timings before failure: {timings}")
+                raise
 
             # Record loss for curriculum
             if self.curriculum:
@@ -435,23 +629,33 @@ class SEMTrainer:
             )
 
             # Console logging
-            self.console_cb.on_step_end(self.global_step, step_metrics, tokens_in_step)
+            self.console_cb.on_step_end(
+                self.global_step,
+                step_metrics,
+                tokens_in_step,
+                timings if c.timing_enabled else None,
+            )
 
             # wandb logging
             if self.global_step % c.log_interval == 0:
                 self.wandb_cb.log(step_metrics, step=self.global_step)
 
             # Health check
+            current_phase = "health_check"
             if self.global_step % c.health_check_interval == 0:
+                t_health_start = time.perf_counter()
                 if self.device.type == "xpu":
                     torch.xpu.empty_cache()
 
-                sample = token_ids[:1]  # Use first sample from last batch
+                sample = token_ids[:1]
                 report = self.health.check(
                     self.model, sample, self.global_step, grad_norm
                 )
                 self.console_cb.on_health_report(report)
                 self.wandb_cb.log(self.health.get_metrics_dict(), step=self.global_step)
+
+                if c.timing_enabled:
+                    timings["health_check"] = time.perf_counter() - t_health_start
 
                 if report.has_error:
                     self.wandb_cb.alert("SEM Health Error", "\n".join(report.messages))
@@ -473,6 +677,7 @@ class SEMTrainer:
                     logger.warning(f"Reduced LR by 50% due to health error")
 
             # Curriculum transition check
+            current_phase = "curriculum_transition"
             if self.curriculum and self.curriculum.should_check_transition(
                 self.global_step
             ):
@@ -482,13 +687,19 @@ class SEMTrainer:
                     else True
                 )
                 if self.curriculum.check_transition(self.global_step, health_ok):
+                    t_transition_start = time.perf_counter()
                     self._handle_stage_transition()
-                    # Rebuild dataloader for new stage
                     dataloader = self._build_dataloader()
                     data_iter = iter(dataloader)
+                    if c.timing_enabled:
+                        timings["curriculum_transition"] = (
+                            time.perf_counter() - t_transition_start
+                        )
 
             # Regular checkpoint
+            current_phase = "checkpoint_save"
             if self.global_step % c.checkpoint_interval == 0:
+                t_ckpt_start = time.perf_counter()
                 self.checkpoint_mgr.save(
                     model=self.model,
                     optimizer=self.optimizer,
@@ -500,6 +711,8 @@ class SEMTrainer:
                     quantizer=self.quantizer,
                     wandb_run_id=self.wandb_cb.run_id,
                 )
+                if c.timing_enabled:
+                    timings["checkpoint_save"] = time.perf_counter() - t_ckpt_start
 
         # Final save
         logger.info("Training complete!")
