@@ -9,6 +9,10 @@ import torch
 from torch.utils.data import IterableDataset, DataLoader
 from typing import Optional, Iterator, Tuple
 from pathlib import Path
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 
 class FineWebEduStream:
@@ -37,23 +41,36 @@ class FineWebEduStream:
         """Yield document texts that meet the quality threshold."""
         from datasets import load_dataset
 
+        logger.info(f"[DATA] Starting FineWeb-Edu stream from {self.dataset_name}")
+        logger.info(f"[DATA] Split: {self.split}, min_score: {self.min_score}")
+        start_time = time.time()
+
         ds = load_dataset(
             self.dataset_name,
             split=self.split,
             streaming=True,
         )
+        logger.info(f"[DATA] Dataset loaded in {time.time() - start_time:.2f}s")
 
         # Filter by education quality score
         if self.min_score > 0:
+            logger.info(f"[DATA] Filtering by min_score >= {self.min_score}")
             ds = ds.filter(lambda x: x.get("score", 0) >= self.min_score)
 
         # Shuffle within buffer
         if self.shuffle_buffer > 0:
+            logger.info(f"[DATA] Shuffling with buffer_size={self.shuffle_buffer}")
             ds = ds.shuffle(buffer_size=self.shuffle_buffer)
+
+        doc_count = 0
+        logger.info("[DATA] Streaming documents...")
 
         for example in ds:
             text = example.get("text", "")
             if text.strip():
+                doc_count += 1
+                if doc_count % 1000 == 0:
+                    logger.info(f"[DATA] Streamed {doc_count} documents...")
                 yield text
 
 
@@ -89,8 +106,14 @@ class SequencePacker:
             tuple: (torch.LongTensor of shape [seq_len], torch.Tensor of shape [vocab_size])
         """
         buffer = []
+        docs_processed = 0
+        sequences_yielded = 0
+
+        logger.info(f"[PACK] Starting sequence packing (seq_len={self.seq_len})...")
 
         for text in text_iterator:
+            docs_processed += 1
+
             # Tokenize document
             tokens = self.tokenizer.encode(text)
             if not tokens:
@@ -112,6 +135,11 @@ class SequencePacker:
 
             # Yield complete sequences from buffer
             while len(buffer) >= self.seq_len:
+                sequences_yielded += 1
+                if sequences_yielded % 100 == 0:
+                    logger.info(
+                        f"[PACK] Yielded {sequences_yielded} sequences from {docs_processed} docs"
+                    )
                 yield (
                     torch.tensor(buffer[: self.seq_len], dtype=torch.long),
                     self.token_freqs.clone(),

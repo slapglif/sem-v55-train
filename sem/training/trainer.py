@@ -330,11 +330,16 @@ class SEMTrainer:
             )
 
         self.model.train()
+        logger.info("[TRAIN] Building dataloader...")
         dataloader = self._build_dataloader()
+        logger.info("[TRAIN] Creating data iterator...")
         data_iter = iter(dataloader)
         micro_step = 0
 
         self.optimizer.zero_grad()
+
+        logger.info(f"[TRAIN] Starting training loop (max_steps={c.max_steps})...")
+        logger.info("=" * 60)
 
         while self.global_step < c.max_steps:
             self.console_cb.on_step_start()
@@ -343,9 +348,14 @@ class SEMTrainer:
             step_metrics = {}
 
             # Gradient accumulation loop
-            for _ in range(accum_steps):
+            for accum_idx in range(accum_steps):
+                if self.global_step == 0 and accum_idx == 0:
+                    logger.info("[TRAIN] Loading first batch...")
+
                 try:
                     batch = next(data_iter)
+                    if self.global_step == 0 and accum_idx == 0:
+                        logger.info("[TRAIN] First batch loaded successfully!")
                 except StopIteration:
                     # Rebuild dataloader (streaming reset)
                     dataloader = self._build_dataloader()
