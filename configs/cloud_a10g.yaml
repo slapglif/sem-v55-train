@@ -27,7 +27,7 @@ propagator:
   cg_max_iter: 10
   cg_tol: 1.0e-6
   nonlinear_alpha: 0.1
-  laplacian_sparsity: 8
+  laplacian_sparsity: 4
 
 quantizer:
   codebook_size: 512
@@ -43,7 +43,7 @@ sampler:
 
 training:
   batch_size: 512
-  micro_batch_size: 64
+  micro_batch_size: 16
   gradient_checkpointing: true
   dtype: float32
   learning_rate: 6.0e-4
