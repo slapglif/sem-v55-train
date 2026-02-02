@@ -31,7 +31,7 @@ E=$(pytime); echo "[STAGE 1/4] Done in $(pdiff $S $E)s"
 
 banner "[STAGE 2/4] Installing dependencies via UV..."
 S=$(pytime)
-uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]'
+uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]' lightning rich
 E=$(pytime); echo "[STAGE 2/4] Done in $(pdiff $S $E)s"
 
 banner "[STAGE 3/4] Downloading model repo..."
@@ -43,7 +43,7 @@ banner "[STAGE 4/4] Starting training..."
 cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
-python3 hf_train.py """
+python3 hf_train_lightning.py --no-compile """
     + extra_args
 )
 
