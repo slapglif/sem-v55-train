@@ -25,6 +25,8 @@ Refactor the `sem` codebase to replace `torch.complex64` parameters and arithmet
 | 6 | T10 | Trainer XPU & RAM Aggression | executor | All Above | COMPLETED |
 | 6 | T10a | Final Pipeline Validation | executor | T0a, T10 | COMPLETED |
 | 6 | T10b | Launch Max Aggression Training | executor | T10a | COMPLETED |
+| 7 | T11 | Revert Broken SEOP Optimizations | executor | T10b | COMPLETED |
+| 7 | T12 | Local XPU/CPU Validation Test | executor | T11 | COMPLETED |
 
 ### 3. Detailed Subtasks & Completion Summary
 
@@ -58,6 +60,22 @@ Refactor the `sem` codebase to replace `torch.complex64` parameters and arithmet
   - Subtask 1: Training launched on XPU with max aggression config ✓
   - Subtask 2: Model builds successfully (29.9M parameters) ✓
   - Subtask 3: Tokenizer trained on FineWeb-Edu (32,768 vocab) ✓
+
+#### Wave 7: Post-SEOP Stabilization (T11, T12) - COMPLETED
+- **T11** (COMPLETED):
+  - Subtask 1: Identified NaN loss cause from SEOP "optimizations" ✓
+  - Subtask 2: Reverted CG solver stop-gradient wrapper → implicit differentiation restored ✓
+  - Subtask 3: Reverted Mamba parallel scan → sequential O(S) loop restored ✓
+  - Subtask 4: Kept cg_max_iter=3 optimization (safe) ✓
+  - Subtask 5: Added seamless XPU/CUDA/CPU auto-detection in hf_train.py ✓
+  - Subtask 6: Committed and pushed fixes (commit 0819bc3) ✓
+- **T12** (COMPLETED):
+  - Subtask 1: Created test_xpu_local.py validation script ✓
+  - Subtask 2: Fixed Windows Unicode encoding issues ✓
+  - Subtask 3: Ran local test - No NaN loss detected ✓
+  - Subtask 4: Verified gradients flow correctly ✓
+  - Subtask 5: Model builds successfully (~573K params for test config) ✓
+  - Subtask 6: Committed test file (commit 3a20325) ✓
 
 ### 4. Training Command
 
@@ -101,5 +119,8 @@ NONE - All tasks completed. Ready for full training run.
 3. ✓ Component Refactor: Layers (T3-T5) and Solvers (T6-T8) updated
 4. ✓ Optimization: Optimizer (T9), SEOP enhancements (T9a, T9b), Training Config (T10)
 5. ✓ Validation: Dry-run verified (T10a), Training launched (T10b)
+6. ✓ Stabilization: Reverted broken SEOP optimizations (T11), Local validation passed (T12)
 
-## Project Status: **READY FOR FULL TRAINING**
+## Project Status: **READY FOR HF DEPLOYMENT**
+
+Note: Local XPU test passed on CPU (XPU hardware not available in current environment). For actual XPU training, use HF Jobs with valid HF_TOKEN.
