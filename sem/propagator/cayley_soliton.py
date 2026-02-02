@@ -87,15 +87,7 @@ class CayleySolitonPropagator(nn.Module):
         Returns:
             psi_out: [B, S, D] complex64 propagated wavefunction
         """
-        return self._forward_float32(psi)
-
-    def _forward_float32(self, psi: Tensor) -> Tensor:
-        device_type = "cuda" if psi.is_cuda else "cpu"
-        with torch.amp.autocast(device_type, enabled=False):
-            psi = psi.to(torch.complex64) if psi.dtype != torch.complex64 else psi
-            return self._forward_impl(psi)
-
-    def _forward_impl(self, psi: Tensor) -> Tensor:
+        psi = psi.to(torch.complex64) if psi.dtype != torch.complex64 else psi
         _t = self.timing_enabled
         t0 = t_cache = t_rhs = t_gate = t_cg = 0.0
         if _t:

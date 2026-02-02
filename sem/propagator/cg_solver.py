@@ -51,8 +51,6 @@ class CGSolverFunction(Function):
         return grad_rhs, grad_A, None, None
 
 
-@torch.amp.autocast("cuda", enabled=False)
-@torch.amp.autocast("cpu", enabled=False)
 def _cg_solve(
     A: Any,
     b: Tensor,
