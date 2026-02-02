@@ -42,6 +42,7 @@ E=$(pytime); echo "[STAGE 3/4] Repo downloaded to $REPO_PATH in $(pdiff $S $E)s"
 banner "[STAGE 4/4] Starting training..."
 cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
+export PYTHONUNBUFFERED=1
 python3 hf_train.py """
     + extra_args
 )

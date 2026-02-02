@@ -1,0 +1,75 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 106 files:   0%|          | 0/106 [00:00<?, ?it/s]Fetching 106 files:  17%|█▋        | 18/106 [00:00<00:00, 152.65it/s]Fetching 106 files:  45%|████▌     | 48/106 [00:00<00:00, 220.13it/s]Fetching 106 files:  67%|██████▋   | 71/106 [00:00<00:00, 168.70it/s]Fetching 106 files:  87%|████████▋ | 92/106 [00:00<00:00, 169.85it/s]Fetching 106 files: 100%|██████████| 106/106 [00:00<00:00, 170.24it/s]
+11:59:24 [INFO] ============================================================
+11:59:24 [INFO] SEM V5.5 Training - System Info
+11:59:24 [INFO] ============================================================
+11:59:24 [INFO] PyTorch: 2.6.0+cu124
+11:59:24 [INFO] CUDA available: True
+11:59:24 [INFO] CUDA version: 12.4
+11:59:24 [INFO] GPU: NVIDIA L40S
+11:59:24 [INFO] VRAM: 44.4GB
+11:59:24 [INFO] SM count: 142
+11:59:24 [INFO] bf16 supported: True
+11:59:24 [INFO] CPU cores: 8
+11:59:24 [INFO] ============================================================
+11:59:24 [INFO] GPU: NVIDIA L40S (44.4GB)
+11:59:24 [INFO] Device: cuda
+11:59:24 [INFO] Config: configs/a100_optimized.yaml
+11:59:24 [INFO] micro_batch=16, batch=512, accum=32
+11:59:24 [INFO] DRY RUN: 20 steps, real streaming data, full timing
+11:59:24 [INFO] Building SEM V5.5 model...
+11:59:25 [INFO] Parameters: 27,542,120 effective real
+11:59:25 [INFO] torch.compile disabled (--no-compile)
+11:59:25 [INFO] AMP enabled with bf16 (native tensor core support)
+11:59:25 [INFO] Gradient checkpointing enabled on 8 Mamba layers
+11:59:25 [INFO] Model build time: 1.2s
+11:59:25 [INFO] SEM V5.5 'Lean Crystal' Training
+11:59:25 [INFO] Device: cuda
+11:59:25 [INFO] Effective batch size: 512 (micro=4 x accum=128)
+11:59:25 [INFO] [TRAIN] Building dataloader...
+11:59:25 [INFO] [DATA] DataLoader created in 0.000s (batch_size=4, workers=4, pin_memory=True)
+11:59:25 [INFO] [TRAIN] Creating data iterator...
+11:59:25 [INFO] [TRAIN] Starting training loop (max_steps=20)...
+11:59:25 [INFO] ============================================================
+11:59:25 [INFO] [TRAIN] Loading first batch...
+11:59:25 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:59:25 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:59:25 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:59:25 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:59:26 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:59:26 [INFO] [DATA] Split: train, min_score: 2
+11:59:26 [INFO] [DATA] Using HF_TOKEN from environment
+11:59:26 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:59:26 [INFO] [DATA] Split: train, min_score: 2
+11:59:26 [INFO] [DATA] Using HF_TOKEN from environment
+11:59:26 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:59:26 [INFO] [DATA] Split: train, min_score: 2
+11:59:26 [INFO] [DATA] Using HF_TOKEN from environment
+11:59:26 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:59:26 [INFO] [DATA] Split: train, min_score: 2
+11:59:26 [INFO] [DATA] Using HF_TOKEN from environment
+11:59:27 [INFO] [DATA] Dataset loaded in 0.89s
+11:59:27 [INFO] [DATA] Filtering by min_score >= 2
+11:59:27 [INFO] [DATA] Shuffling with buffer_size=50000
+11:59:27 [INFO] [DATA] Pipeline setup: load=0.893s filter=0.001s shuffle=0.002s
+11:59:27 [INFO] [DATA] Waiting for first document from stream...
+11:59:27 [INFO] [DATA] Dataset loaded in 0.85s
+11:59:27 [INFO] [DATA] Filtering by min_score >= 2
+11:59:27 [INFO] [DATA] Shuffling with buffer_size=50000
+11:59:27 [INFO] [DATA] Pipeline setup: load=0.846s filter=0.001s shuffle=0.002s
+11:59:27 [INFO] [DATA] Waiting for first document from stream...
+11:59:27 [INFO] [DATA] Dataset loaded in 0.97s
+11:59:27 [INFO] [DATA] Filtering by min_score >= 2
+11:59:27 [INFO] [DATA] Shuffling with buffer_size=50000
+11:59:27 [INFO] [DATA] Pipeline setup: load=0.967s filter=0.001s shuffle=0.002s
+11:59:27 [INFO] [DATA] Waiting for first document from stream...
+11:59:27 [INFO] [DATA] Dataset loaded in 0.98s
+11:59:27 [INFO] [DATA] Filtering by min_score >= 2
+11:59:27 [INFO] [DATA] Shuffling with buffer_size=50000
+11:59:27 [INFO] [DATA] Pipeline setup: load=0.975s filter=0.073s shuffle=0.002s
+11:59:27 [INFO] [DATA] Waiting for first document from stream...
+11:59:31 [INFO] [DATA] First doc received (4.1s)
+11:59:31 [INFO] [TRAIN] First batch loaded successfully!
+11:59:31 [INFO] [DATA] First doc received (4.3s)
+11:59:32 [INFO] [DATA] First doc received (4.8s)
+11:59:32 [INFO] [DATA] First doc received (5.3s)

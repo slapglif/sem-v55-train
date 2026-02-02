@@ -1,0 +1,133 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 105 files:   0%|          | 0/105 [00:00<?, ?it/s]Fetching 105 files:   7%|▋         | 7/105 [00:00<00:01, 55.80it/s]Fetching 105 files:  34%|███▍      | 36/105 [00:00<00:00, 176.24it/s]Fetching 105 files:  58%|█████▊    | 61/105 [00:00<00:00, 206.05it/s]Fetching 105 files:  79%|███████▉  | 83/105 [00:00<00:00, 172.46it/s]Fetching 105 files:  98%|█████████▊| 103/105 [00:00<00:00, 175.19it/s]Fetching 105 files: 100%|██████████| 105/105 [00:00<00:00, 161.47it/s]
+11:51:08 [INFO] ============================================================
+11:51:08 [INFO] SEM V5.5 Training - System Info
+11:51:08 [INFO] ============================================================
+11:51:08 [INFO] PyTorch: 2.6.0+cu124
+11:51:08 [INFO] CUDA available: True
+11:51:08 [INFO] CUDA version: 12.4
+11:51:08 [INFO] GPU: NVIDIA L40S
+11:51:08 [INFO] VRAM: 44.4GB
+11:51:08 [INFO] SM count: 142
+11:51:08 [INFO] bf16 supported: True
+11:51:08 [INFO] CPU cores: 8
+11:51:08 [INFO] ============================================================
+11:51:08 [INFO] GPU: NVIDIA L40S (44.4GB)
+11:51:08 [INFO] Device: cuda
+11:51:08 [INFO] Config: configs/a100_optimized.yaml
+11:51:08 [INFO] micro_batch=16, batch=512, accum=32
+11:51:08 [INFO] DRY RUN: 20 steps, real streaming data, full timing
+11:51:08 [INFO] Building SEM V5.5 model...
+11:51:08 [INFO] Parameters: 27,542,120 effective real
+11:51:08 [INFO] torch.compile disabled (--no-compile)
+11:51:08 [INFO] AMP enabled with bf16 (native tensor core support)
+11:51:09 [INFO] Gradient checkpointing enabled on 8 Mamba layers
+11:51:09 [INFO] Model build time: 1.2s
+11:51:09 [INFO] SEM V5.5 'Lean Crystal' Training
+11:51:09 [INFO] Device: cuda
+11:51:09 [INFO] Effective batch size: 512 (micro=16 x accum=32)
+11:51:09 [INFO] [TRAIN] Building dataloader...
+11:51:09 [INFO] [DATA] DataLoader created in 0.000s (batch_size=16, workers=4, pin_memory=True)
+11:51:09 [INFO] [TRAIN] Creating data iterator...
+11:51:09 [INFO] [TRAIN] Starting training loop (max_steps=20)...
+11:51:09 [INFO] ============================================================
+11:51:09 [INFO] [TRAIN] Loading first batch...
+11:51:09 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:51:09 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:51:09 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:51:09 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:51:10 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:51:10 [INFO] [DATA] Split: train, min_score: 2
+11:51:10 [INFO] [DATA] Using HF_TOKEN from environment
+11:51:10 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:51:10 [INFO] [DATA] Split: train, min_score: 2
+11:51:10 [INFO] [DATA] Using HF_TOKEN from environment
+11:51:10 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:51:10 [INFO] [DATA] Split: train, min_score: 2
+11:51:10 [INFO] [DATA] Using HF_TOKEN from environment
+11:51:10 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:51:10 [INFO] [DATA] Split: train, min_score: 2
+11:51:10 [INFO] [DATA] Using HF_TOKEN from environment
+11:51:11 [INFO] [DATA] Dataset loaded in 0.97s
+11:51:11 [INFO] [DATA] Filtering by min_score >= 2
+11:51:11 [INFO] [DATA] Dataset loaded in 0.95s
+11:51:11 [INFO] [DATA] Filtering by min_score >= 2
+11:51:11 [INFO] [DATA] Shuffling with buffer_size=50000
+11:51:11 [INFO] [DATA] Pipeline setup: load=0.954s filter=0.001s shuffle=0.002s
+11:51:11 [INFO] [DATA] Waiting for first document from stream...
+11:51:11 [INFO] [DATA] Shuffling with buffer_size=50000
+11:51:11 [INFO] [DATA] Pipeline setup: load=0.966s filter=0.104s shuffle=0.002s
+11:51:11 [INFO] [DATA] Waiting for first document from stream...
+11:51:11 [INFO] [DATA] Dataset loaded in 1.26s
+11:51:11 [INFO] [DATA] Filtering by min_score >= 2
+11:51:11 [INFO] [DATA] Shuffling with buffer_size=50000
+11:51:11 [INFO] [DATA] Pipeline setup: load=1.263s filter=0.001s shuffle=0.002s
+11:51:11 [INFO] [DATA] Waiting for first document from stream...
+11:51:11 [INFO] [DATA] Dataset loaded in 1.28s
+11:51:11 [INFO] [DATA] Filtering by min_score >= 2
+11:51:11 [INFO] [DATA] Shuffling with buffer_size=50000
+11:51:11 [INFO] [DATA] Pipeline setup: load=1.279s filter=0.001s shuffle=0.001s
+11:51:11 [INFO] [DATA] Waiting for first document from stream...
+11:51:15 [INFO] [DATA] First doc received (4.0s)
+11:51:16 [INFO] [DATA] First doc received (4.5s)
+11:51:16 [INFO] [DATA] First doc received (4.8s)
+11:51:16 [INFO] [DATA] First doc received (4.5s)
+11:51:16 [INFO] [TRAIN] First batch loaded successfully!
+11:51:16 [ERROR] [TRAIN] Exception during phase 'forward' at step 0
+Traceback (most recent call last):
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/hf_train.py", line 198, in <module>
+    main()
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/hf_train.py", line 162, in main
+    trainer.train()
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/sem/training/trainer.py", line 419, in train
+    output = self.model(
+             ^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/sem/model.py", line 110, in forward
+    psi = mamba_layer(psi)  # [B, S, D] complex64
+          ^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/sem/training/trainer.py", line 202, in ckpt_forward
+    return checkpoint(fwd, x, use_reentrant=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/_compile.py", line 32, in inner
+    return disable_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 745, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/utils/checkpoint.py", line 496, in checkpoint
+    ret = function(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/sem/spinor/complex_mamba3.py", line 243, in forward
+    x = self.spinor_gate(x)
+        ^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/sem/spinor/spinor_block.py", line 135, in forward
+    rotated = self.spinor(x)
+              ^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/25c308979d930f63017d8e5c94e93bf0e3e1592c/sem/spinor/spinor_block.py", line 98, in forward
+    out = torch.complex(out_real, out_imag)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Expected both inputs to be Half, Float or Double tensors but got BFloat16 and BFloat16

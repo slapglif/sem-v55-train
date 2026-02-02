@@ -153,34 +153,29 @@ def cg_solve_sparse(
     precond=None,
     x0: Optional[Tensor] = None,
 ) -> Tensor:
-    """CG solve using sparse matvec with STOP-GRADIENT for training speed.
+    """CG solve using sparse matvec with implicit differentiation.
 
-    SEOP FIX: Stop gradient through solver to prevent backward pass explosion.
-    Training doesn't need exact gradients through CG iterations.
+    Uses the mathematical trick: x = x_star + (b - A @ x_star)
+    to avoid storing all CG iterates while maintaining gradient flow.
 
     Args:
         matvec_fn: Callable v -> A @ v (must be differentiable)
         b: [..., D] complex64 right-hand side
-        max_iter: Maximum CG iterations (SEOP: use 3 for training, not 40)
+        max_iter: Maximum CG iterations (use 3 for fast training, 40 for accuracy)
         tol: Convergence tolerance
         precond: Optional preconditioner callable(v) -> M^{-1} @ v
         x0: Optional warm-start initial guess
 
     Returns:
-        x: [..., D] complex64 solution (detached from CG computational graph)
+        x: [..., D] complex64 solution
     """
     with torch.no_grad():
         x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond, x0=x0)
 
-    # SEOP: Stop gradient through solver entirely
-    # The solver is a black-box that produces x_star from b
-    # Gradients flow to Hamiltonian parameters through forward pass only
-    x_star = x_star.detach()
-
-    # Re-attach to computation graph with minimal residual connection
-    # This allows gradients to flow to b (input) but NOT through CG iterations
     if torch.is_grad_enabled() and b.requires_grad:
-        x = x_star + b * 0.0  # Dummy operation to maintain graph connectivity
+        Ax = matvec_fn(x_star)
+        residual = b - Ax
+        x = x_star + residual
     else:
         x = x_star
 

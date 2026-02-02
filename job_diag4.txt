@@ -1,0 +1,16 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 107 files:   0%|          | 0/107 [00:00<?, ?it/s]Fetching 107 files:  15%|█▍        | 16/107 [00:00<00:00, 157.18it/s]Fetching 107 files:  32%|███▏      | 34/107 [00:00<00:00, 159.42it/s]Fetching 107 files:  47%|████▋     | 50/107 [00:00<00:00, 144.87it/s]Fetching 107 files:  65%|██████▌   | 70/107 [00:00<00:00, 163.50it/s]Fetching 107 files:  92%|█████████▏| 98/107 [00:00<00:00, 199.49it/s]Fetching 107 files: 100%|██████████| 107/107 [00:00<00:00, 165.61it/s]
+Device: cuda
+PyTorch: 2.6.0+cu124
+DBG amp_sq shape=torch.Size([2, 127, 32768]) dtype=torch.float32
+DBG amp_sq_sum shape=torch.Size([2, 127]) min=21600.18 max=22188.40 mean=21908.91
+DBG log_sq shape=torch.Size([2, 127]) min=99.6095 max=100.1466 mean=99.8926
+DBG unitary_divergence=99.8926
+DBG nll_term=0.9221
+loss: 10.9114
+unitary_divergence: 99.8926
+amp_sq: min=1.153525e-08 max=1.058929e+01 mean=6.686028e-01
+amp_sq_sum: mean=21908.9141 min=21600.1758 max=22188.4023
+log(sum)^2: mean=99.8926 min=99.6095 max=100.1466
+amp_sq dtype: torch.float32
+amp_sq_sum dtype: torch.float32

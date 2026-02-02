@@ -1,0 +1,11 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 107 files:   0%|          | 0/107 [00:00<?, ?it/s]Fetching 107 files:  18%|█▊        | 19/107 [00:00<00:00, 186.81it/s]Fetching 107 files:  36%|███▌      | 38/107 [00:00<00:00, 151.67it/s]Fetching 107 files:  60%|█████▉    | 64/107 [00:00<00:00, 188.69it/s]Fetching 107 files:  82%|████████▏ | 88/107 [00:00<00:00, 204.60it/s]Fetching 107 files: 100%|██████████| 107/107 [00:00<00:00, 156.37it/s]
+Device: cuda
+PyTorch: 2.6.0+cu124
+loss: 48051092.0000
+unitary_divergence: 480510912.0000
+amp_sq: min=2.914772e-07 max=9.683168e+00 mean=6.689513e-01
+amp_sq_sum: mean=21921.3613 min=21696.5273 max=22180.1973
+log(sum)^2: mean=99.9042 min=99.6984 max=100.1392
+amp_sq dtype: torch.float32
+amp_sq_sum dtype: torch.float32

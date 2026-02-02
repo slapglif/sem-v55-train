@@ -1,0 +1,91 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 106 files:   0%|          | 0/106 [00:00<?, ?it/s]Fetching 106 files:  18%|█▊        | 19/106 [00:00<00:00, 152.14it/s]Fetching 106 files:  42%|████▏     | 45/106 [00:00<00:00, 203.80it/s]Fetching 106 files:  69%|██████▉   | 73/106 [00:00<00:00, 229.21it/s]Fetching 106 files:  92%|█████████▏| 97/106 [00:00<00:00, 179.72it/s]Fetching 106 files: 100%|██████████| 106/106 [00:00<00:00, 173.50it/s]
+11:57:37 [INFO] ============================================================
+11:57:37 [INFO] SEM V5.5 Training - System Info
+11:57:37 [INFO] ============================================================
+11:57:37 [INFO] PyTorch: 2.6.0+cu124
+11:57:37 [INFO] CUDA available: True
+11:57:37 [INFO] CUDA version: 12.4
+11:57:37 [INFO] GPU: NVIDIA L40S
+11:57:37 [INFO] VRAM: 44.4GB
+11:57:37 [INFO] SM count: 142
+11:57:37 [INFO] bf16 supported: True
+11:57:37 [INFO] CPU cores: 8
+11:57:37 [INFO] ============================================================
+11:57:37 [INFO] GPU: NVIDIA L40S (44.4GB)
+11:57:37 [INFO] Device: cuda
+11:57:37 [INFO] Config: configs/a100_optimized.yaml
+11:57:37 [INFO] micro_batch=16, batch=512, accum=32
+11:57:37 [INFO] DRY RUN: 20 steps, real streaming data, full timing
+11:57:37 [INFO] Building SEM V5.5 model...
+11:57:37 [INFO] Parameters: 27,542,120 effective real
+11:57:37 [INFO] torch.compile disabled (--no-compile)
+11:57:37 [INFO] AMP enabled with bf16 (native tensor core support)
+11:57:38 [INFO] Gradient checkpointing enabled on 8 Mamba layers
+11:57:38 [INFO] Model build time: 1.2s
+11:57:38 [INFO] SEM V5.5 'Lean Crystal' Training
+11:57:38 [INFO] Device: cuda
+11:57:38 [INFO] Effective batch size: 512 (micro=16 x accum=32)
+11:57:38 [INFO] [TRAIN] Building dataloader...
+11:57:38 [INFO] [DATA] DataLoader created in 0.000s (batch_size=16, workers=4, pin_memory=True)
+11:57:38 [INFO] [TRAIN] Creating data iterator...
+11:57:38 [INFO] [TRAIN] Starting training loop (max_steps=20)...
+11:57:38 [INFO] ============================================================
+11:57:38 [INFO] [TRAIN] Loading first batch...
+11:57:38 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:57:38 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:57:38 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:57:38 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:57:39 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:57:39 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:57:39 [INFO] [DATA] Split: train, min_score: 2
+11:57:39 [INFO] [DATA] Split: train, min_score: 2
+11:57:39 [INFO] [DATA] Using HF_TOKEN from environment
+11:57:39 [INFO] [DATA] Using HF_TOKEN from environment
+11:57:39 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:57:39 [INFO] [DATA] Split: train, min_score: 2
+11:57:39 [INFO] [DATA] Using HF_TOKEN from environment
+11:57:39 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:57:39 [INFO] [DATA] Split: train, min_score: 2
+11:57:39 [INFO] [DATA] Using HF_TOKEN from environment
+11:57:40 [INFO] [DATA] Dataset loaded in 0.91s
+11:57:40 [INFO] [DATA] Filtering by min_score >= 2
+11:57:40 [INFO] [DATA] Shuffling with buffer_size=50000
+11:57:40 [INFO] [DATA] Pipeline setup: load=0.914s filter=0.002s shuffle=0.002s
+11:57:40 [INFO] [DATA] Waiting for first document from stream...
+11:57:40 [INFO] [DATA] Dataset loaded in 0.93s
+11:57:40 [INFO] [DATA] Filtering by min_score >= 2
+11:57:40 [INFO] [DATA] Dataset loaded in 0.95s
+11:57:40 [INFO] [DATA] Filtering by min_score >= 2
+11:57:40 [INFO] [DATA] Shuffling with buffer_size=50000
+11:57:40 [INFO] [DATA] Pipeline setup: load=0.954s filter=0.001s shuffle=0.002s
+11:57:40 [INFO] [DATA] Waiting for first document from stream...
+11:57:40 [INFO] [DATA] Shuffling with buffer_size=50000
+11:57:40 [INFO] [DATA] Pipeline setup: load=0.929s filter=0.069s shuffle=0.002s
+11:57:40 [INFO] [DATA] Waiting for first document from stream...
+11:57:40 [INFO] [DATA] Dataset loaded in 1.07s
+11:57:40 [INFO] [DATA] Filtering by min_score >= 2
+11:57:40 [INFO] [DATA] Shuffling with buffer_size=50000
+11:57:40 [INFO] [DATA] Pipeline setup: load=1.072s filter=0.001s shuffle=0.002s
+11:57:40 [INFO] [DATA] Waiting for first document from stream...
+11:57:44 [INFO] [DATA] First doc received (4.1s)
+11:57:44 [INFO] [DATA] First doc received (4.4s)
+11:57:44 [INFO] [DATA] First doc received (4.4s)
+11:57:44 [INFO] [DATA] First doc received (4.5s)
+11:57:44 [INFO] [TRAIN] First batch loaded successfully!
+11:57:51 [ERROR] [TRAIN] Exception during phase 'backward' at step 0
+Traceback (most recent call last):
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/5822adbc9b1fb1c0418a496b8b87d8e525b47c39/hf_train.py", line 198, in <module>
+    main()
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/5822adbc9b1fb1c0418a496b8b87d8e525b47c39/hf_train.py", line 162, in main
+    trainer.train()
+  File "/root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/5822adbc9b1fb1c0418a496b8b87d8e525b47c39/sem/training/trainer.py", line 448, in train
+    scaled_loss.backward()
+  File "/opt/conda/lib/python3.11/site-packages/torch/_tensor.py", line 626, in backward
+    torch.autograd.backward(
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/__init__.py", line 347, in backward
+    _engine_run_backward(
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/graph.py", line 823, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 44.39 GiB of which 2.22 GiB is free. Including non-PyTorch memory, this process has 42.17 GiB memory in use. Of the allocated memory 41.54 GiB is allocated by PyTorch, and 126.17 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

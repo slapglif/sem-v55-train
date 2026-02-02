@@ -1,0 +1,113 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 107 files:   0%|          | 0/107 [00:00<?, ?it/s]Fetching 107 files:  18%|█▊        | 19/107 [00:00<00:00, 178.35it/s]Fetching 107 files:  35%|███▍      | 37/107 [00:00<00:00, 135.85it/s]Fetching 107 files:  71%|███████   | 76/107 [00:00<00:00, 229.11it/s]Fetching 107 files:  94%|█████████▍| 101/107 [00:00<00:00, 225.69it/s]Fetching 107 files: 100%|██████████| 107/107 [00:00<00:00, 189.80it/s]
+14:16:53 [INFO] ============================================================
+14:16:53 [INFO] SEM V5.5 Training - System Info
+14:16:53 [INFO] ============================================================
+14:16:53 [INFO] PyTorch: 2.6.0+cu124
+14:16:53 [INFO] CUDA available: True
+14:16:53 [INFO] CUDA version: 12.4
+14:16:53 [INFO] GPU: NVIDIA L40S
+14:16:53 [INFO] VRAM: 44.4GB
+14:16:53 [INFO] SM count: 142
+14:16:53 [INFO] bf16 supported: True
+14:16:53 [INFO] CPU cores: 8
+14:16:53 [INFO] ============================================================
+14:16:53 [INFO] GPU: NVIDIA L40S (44.4GB)
+14:16:53 [INFO] Device: cuda
+14:16:53 [INFO] Config: configs/a100_optimized.yaml
+14:16:53 [INFO] micro_batch=16, batch=512, accum=32
+14:16:53 [INFO] DRY RUN: 20 steps, batch=32, seq=512, real streaming data, full timing
+14:16:53 [INFO] Building SEM V5.5 model...
+14:16:54 [INFO] Parameters: 27,542,120 effective real
+14:16:54 [INFO] torch.compile disabled (--no-compile)
+14:16:54 [INFO] AMP disabled (--no-amp)
+14:16:54 [INFO] Gradient checkpointing enabled on 8 Mamba layers
+14:16:54 [INFO] Model build time: 1.2s
+14:16:54 [INFO] SEM V5.5 'Lean Crystal' Training
+14:16:54 [INFO] Device: cuda
+14:16:54 [INFO] Effective batch size: 32 (micro=4 x accum=8)
+14:16:54 [INFO] [TRAIN] Building dataloader...
+14:16:54 [INFO] [DATA] DataLoader created in 0.000s (batch_size=4, workers=4, pin_memory=True)
+14:16:54 [INFO] [TRAIN] Creating data iterator...
+14:16:54 [INFO] [TRAIN] Starting training loop (max_steps=20)...
+14:16:54 [INFO] ============================================================
+14:16:54 [INFO] [TRAIN] Loading first batch...
+14:16:54 [INFO] [PACK] Starting sequence packing (seq_len=512)...
+14:16:54 [INFO] [PACK] Starting sequence packing (seq_len=512)...
+14:16:54 [INFO] [PACK] Starting sequence packing (seq_len=512)...
+14:16:54 [INFO] [PACK] Starting sequence packing (seq_len=512)...
+14:16:55 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+14:16:55 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+14:16:55 [INFO] [DATA] Split: train, min_score: 2
+14:16:55 [INFO] [DATA] Split: train, min_score: 2
+14:16:55 [INFO] [DATA] Using HF_TOKEN from environment
+14:16:55 [INFO] [DATA] Using HF_TOKEN from environment
+14:16:55 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+14:16:55 [INFO] [DATA] Split: train, min_score: 2
+14:16:55 [INFO] [DATA] Using HF_TOKEN from environment
+14:16:55 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+14:16:55 [INFO] [DATA] Split: train, min_score: 2
+14:16:55 [INFO] [DATA] Using HF_TOKEN from environment
+14:16:56 [INFO] [DATA] Dataset loaded in 0.91s
+14:16:56 [INFO] [DATA] Filtering by min_score >= 2
+14:16:56 [INFO] [DATA] Shuffling with buffer_size=50000
+14:16:56 [INFO] [DATA] Pipeline setup: load=0.909s filter=0.001s shuffle=0.002s
+14:16:56 [INFO] [DATA] Waiting for first document from stream...
+14:16:56 [INFO] [DATA] Dataset loaded in 0.94s
+14:16:56 [INFO] [DATA] Filtering by min_score >= 2
+14:16:56 [INFO] [DATA] Shuffling with buffer_size=50000
+14:16:56 [INFO] [DATA] Pipeline setup: load=0.938s filter=0.001s shuffle=0.002s
+14:16:56 [INFO] [DATA] Waiting for first document from stream...
+14:16:56 [INFO] [DATA] Dataset loaded in 1.03s
+14:16:56 [INFO] [DATA] Filtering by min_score >= 2
+14:16:56 [INFO] [DATA] Dataset loaded in 1.07s
+14:16:56 [INFO] [DATA] Filtering by min_score >= 2
+14:16:56 [INFO] [DATA] Shuffling with buffer_size=50000
+14:16:56 [INFO] [DATA] Pipeline setup: load=1.073s filter=0.001s shuffle=0.002s
+14:16:56 [INFO] [DATA] Waiting for first document from stream...
+14:16:56 [INFO] [DATA] Shuffling with buffer_size=50000
+14:16:56 [INFO] [DATA] Pipeline setup: load=1.029s filter=0.077s shuffle=0.002s
+14:16:56 [INFO] [DATA] Waiting for first document from stream...
+14:17:02 [INFO] [DATA] First doc received (5.6s)
+14:17:02 [INFO] [DATA] First doc received (5.7s)
+14:17:02 [INFO] [DATA] First doc received (6.1s)
+14:17:03 [INFO] [DATA] First doc received (6.5s)
+14:17:03 [INFO] [TRAIN] First batch loaded successfully!
+14:17:38 [INFO] Step 1: | loss=10.9455 | lr=0.000000 | grad_norm=14.8470 | tok/s=378
+14:18:10 [INFO] Step 2: | loss=10.9291 | lr=0.000001 | grad_norm=9.9798 | tok/s=509
+14:18:42 [INFO] Step 3: | loss=10.9278 | lr=0.000001 | grad_norm=9.9541 | tok/s=509
+14:19:15 [INFO] Step 4: | loss=10.9352 | lr=0.000001 | grad_norm=9.2830 | tok/s=506
+14:19:47 [INFO] Step 5: | loss=10.9407 | lr=0.000001 | grad_norm=10.8044 | tok/s=511
+14:19:47 [INFO]   Timing: total=32070.6ms | batch=0.2ms | xfer=0.1ms | fwd=1035.5ms | loss=0.0ms | bwd=2969.6ms | clip=6.4ms | fisher=6.3ms | opt=12.8ms
+14:20:19 [INFO] Step 6: | loss=10.9390 | lr=0.000002 | grad_norm=9.8683 | tok/s=512
+14:20:51 [INFO] Step 7: | loss=10.9368 | lr=0.000002 | grad_norm=10.1988 | tok/s=511
+14:21:23 [INFO] Step 8: | loss=10.9043 | lr=0.000002 | grad_norm=8.7665 | tok/s=514
+14:21:55 [INFO] Step 9: | loss=10.9183 | lr=0.000003 | grad_norm=9.5988 | tok/s=513
+14:22:27 [INFO] Step 10: | loss=10.9456 | lr=0.000003 | grad_norm=10.0435 | tok/s=512
+14:22:27 [INFO]   Timing: total=32015.2ms | batch=0.2ms | xfer=0.2ms | fwd=1034.1ms | loss=0.0ms | bwd=2963.9ms | clip=7.0ms | fisher=6.5ms | opt=13.4ms
+14:22:58 [INFO] Step 11: | loss=10.9418 | lr=0.000003 | grad_norm=11.5186 | tok/s=516
+14:22:58 [INFO] [PACK] Yielded 100 sequences from 50 docs
+14:22:58 [INFO] [PACK] Avg timing: tokenize=2.62ms, freq_update=0.26ms
+14:23:02 [INFO] [PACK] Yielded 100 sequences from 59 docs
+14:23:02 [INFO] [PACK] Avg timing: tokenize=2.36ms, freq_update=0.24ms
+14:23:06 [INFO] [PACK] Yielded 100 sequences from 69 docs
+14:23:06 [INFO] [PACK] Avg timing: tokenize=1.95ms, freq_update=0.23ms
+14:23:10 [INFO] [PACK] Yielded 100 sequences from 41 docs
+14:23:10 [INFO] [PACK] Avg timing: tokenize=2.72ms, freq_update=0.27ms
+14:23:30 [INFO] Step 12: | loss=10.9583 | lr=0.000004 | grad_norm=10.6710 | tok/s=512
+14:24:02 [INFO] Step 13: | loss=10.9394 | lr=0.000004 | grad_norm=9.3791 | tok/s=510
+14:24:35 [INFO] Step 14: | loss=10.9404 | lr=0.000004 | grad_norm=11.1150 | tok/s=506
+14:25:07 [INFO] Step 15: | loss=10.9456 | lr=0.000004 | grad_norm=9.9488 | tok/s=507
+14:25:07 [INFO]   Timing: total=32316.1ms | batch=0.2ms | xfer=0.2ms | fwd=1027.7ms | loss=0.0ms | bwd=3008.1ms | clip=5.6ms | fisher=6.7ms | opt=12.9ms
+14:25:39 [INFO] Step 16: | loss=10.9860 | lr=0.000005 | grad_norm=15.0496 | tok/s=512
+14:26:12 [INFO] Step 17: | loss=10.9630 | lr=0.000005 | grad_norm=11.8565 | tok/s=508
+14:26:44 [INFO] Step 18: | loss=10.9963 | lr=0.000005 | grad_norm=9.7995 | tok/s=509
+14:27:16 [INFO] Step 19: | loss=10.9874 | lr=0.000006 | grad_norm=11.4184 | tok/s=511
+14:27:48 [INFO] Step 20: | loss=10.9965 | lr=0.000006 | grad_norm=9.7151 | tok/s=506
+14:27:48 [INFO]   Timing: total=32363.2ms | batch=0.2ms | xfer=0.2ms | fwd=1026.9ms | loss=0.0ms | bwd=3014.7ms | clip=6.6ms | fisher=6.4ms | opt=13.3ms
+14:27:48 [INFO] Training complete!
+14:27:49 [INFO] ============================================================
+14:27:49 [INFO] Training complete in 654.6s
+14:27:49 [INFO] Avg throughput: 501 tok/s
+14:27:49 [INFO] Avg step time: 32730ms
+14:27:49 [INFO] ============================================================

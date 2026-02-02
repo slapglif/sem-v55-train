@@ -1,0 +1,16 @@
+======================================================================
+SEM BOTTLENECK FIX VERIFICATION
+======================================================================
+
+Model config:
+  hidden_dim: 256
+  num_layers: 8
+  vocab_size: 32768
+
+Building model...
+Parameters: 27,542,120 effective real
+
+Batch size: 4, Sequence length: 1024
+Tokens per batch: 4,096
+
+Warming up (3 steps)...

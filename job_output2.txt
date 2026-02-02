@@ -1,0 +1,137 @@
+Sun Feb  1 11:31:59 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:30:00.0 Off |                    0 |
+| N/A   39C    P8             36W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 104 files:   0%|          | 0/104 [00:00<?, ?it/s]Fetching 104 files:  15%|█▌        | 16/104 [00:00<00:00, 117.88it/s]Fetching 104 files:  41%|████▏     | 43/104 [00:00<00:00, 127.56it/s]Fetching 104 files:  69%|██████▉   | 72/104 [00:00<00:00, 177.81it/s]Fetching 104 files:  89%|████████▉ | 93/104 [00:00<00:00, 174.86it/s]Fetching 104 files: 100%|██████████| 104/104 [00:00<00:00, 159.23it/s]
+11:32:16 [INFO] ============================================================
+11:32:16 [INFO] SEM V5.5 Training - System Info
+11:32:16 [INFO] ============================================================
+11:32:16 [INFO] PyTorch: 2.6.0+cu124
+11:32:16 [INFO] CUDA available: True
+11:32:16 [INFO] CUDA version: 12.4
+11:32:16 [INFO] GPU: NVIDIA L40S
+11:32:16 [INFO] VRAM: 44.4GB
+11:32:16 [INFO] SM count: 142
+11:32:16 [INFO] bf16 supported: True
+11:32:16 [INFO] CPU cores: 8
+11:32:16 [INFO] ============================================================
+11:32:16 [INFO] GPU: NVIDIA L40S (44.4GB)
+11:32:16 [INFO] Device: cuda
+11:32:16 [INFO] Config: configs/a100_optimized.yaml
+11:32:16 [INFO] micro_batch=16, batch=512, accum=32
+11:32:16 [INFO] DRY RUN: 20 steps, real streaming data, full timing
+11:32:16 [INFO] Building SEM V5.5 model...
+11:32:17 [INFO] Parameters: 27,542,120 effective real
+11:32:18 [INFO] torch.compile enabled for CUDA (max-autotune)
+11:32:18 [INFO] AMP enabled with bf16 (native tensor core support)
+11:32:18 [INFO] Gradient checkpointing enabled on 8 Mamba layers
+11:32:18 [INFO] Model build time: 2.1s
+11:32:18 [INFO] SEM V5.5 'Lean Crystal' Training
+11:32:18 [INFO] Device: cuda
+11:32:18 [INFO] Effective batch size: 512 (micro=16 x accum=32)
+11:32:18 [INFO] [TRAIN] Building dataloader...
+11:32:18 [INFO] [DATA] DataLoader created in 0.000s (batch_size=16, workers=4, pin_memory=True)
+11:32:18 [INFO] [TRAIN] Creating data iterator...
+11:32:18 [INFO] [TRAIN] Starting training loop (max_steps=20)...
+11:32:18 [INFO] ============================================================
+11:32:18 [INFO] [TRAIN] Loading first batch...
+11:32:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:32:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:32:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:32:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+11:32:19 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:32:19 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:32:19 [INFO] [DATA] Split: train, min_score: 2
+11:32:19 [INFO] [DATA] Split: train, min_score: 2
+11:32:19 [INFO] [DATA] Using HF_TOKEN from environment
+11:32:19 [INFO] [DATA] Using HF_TOKEN from environment
+11:32:19 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:32:19 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+11:32:19 [INFO] [DATA] Split: train, min_score: 2
+11:32:19 [INFO] [DATA] Split: train, min_score: 2
+11:32:19 [INFO] [DATA] Using HF_TOKEN from environment
+11:32:19 [INFO] [DATA] Using HF_TOKEN from environment
+11:32:20 [INFO] [DATA] Dataset loaded in 0.93s
+11:32:20 [INFO] [DATA] Filtering by min_score >= 2
+11:32:20 [INFO] [DATA] Shuffling with buffer_size=50000
+11:32:20 [INFO] [DATA] Pipeline setup: load=0.929s filter=0.001s shuffle=0.002s
+11:32:20 [INFO] [DATA] Waiting for first document from stream...
+11:32:20 [INFO] [DATA] Dataset loaded in 0.99s
+11:32:20 [INFO] [DATA] Filtering by min_score >= 2
+11:32:20 [INFO] [DATA] Shuffling with buffer_size=50000
+11:32:20 [INFO] [DATA] Pipeline setup: load=0.986s filter=0.001s shuffle=0.001s
+11:32:20 [INFO] [DATA] Waiting for first document from stream...
+11:32:20 [INFO] [DATA] Dataset loaded in 0.91s
+11:32:20 [INFO] [DATA] Filtering by min_score >= 2
+11:32:20 [INFO] [DATA] Shuffling with buffer_size=50000
+11:32:20 [INFO] [DATA] Pipeline setup: load=0.909s filter=0.050s shuffle=0.002s
+11:32:20 [INFO] [DATA] Waiting for first document from stream...
+11:32:20 [INFO] [DATA] Dataset loaded in 1.04s
+11:32:20 [INFO] [DATA] Filtering by min_score >= 2
+11:32:20 [INFO] [DATA] Shuffling with buffer_size=50000
+11:32:20 [INFO] [DATA] Pipeline setup: load=1.037s filter=0.001s shuffle=0.001s
+11:32:20 [INFO] [DATA] Waiting for first document from stream...
+11:32:24 [INFO] [DATA] First doc received (4.2s)
+11:32:25 [INFO] [DATA] First doc received (4.7s)
+11:32:25 [INFO] [TRAIN] First batch loaded successfully!
+11:32:25 [INFO] [DATA] First doc received (4.9s)
+11:32:25 [INFO] [DATA] First doc received (5.1s)
+AUTOTUNE mm(32768x64, 64x128)
+  triton_mm_29 0.0188 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_36 0.0191 ms 98.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=5, num_warps=8
+  triton_mm_30 0.0193 ms 97.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=4, num_warps=4
+  triton_mm_35 0.0193 ms 97.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_34 0.0201 ms 93.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_27 0.0202 ms 93.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  mm 0.0208 ms 90.3% 
+  triton_mm_31 0.0213 ms 88.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_28 0.0217 ms 86.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=4, num_warps=8
+  triton_mm_26 0.0220 ms 85.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=5, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 2.4217 seconds and 0.7266 seconds precompiling for 20 choices
+E0201 11:32:40.634000 14 site-packages/torch/_inductor/select_algorithm.py:1477] [1/0_1] Exception out of resource: shared memory, Required: 131072, Hardware limit: 101376. Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_root/vb/cvb7zjg6wpu6qwuu7h5xijvb5mhe67mwju7pdz7zhqyjqf26k76o.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=5, num_warps=4)
+W0201 11:32:41.769000 14 site-packages/torch/_inductor/select_algorithm.py:1696] [1/0_1] out of resource: shared memory, Required: 131072, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.
+AUTOTUNE addmm(32768x64, 32768x256, 256x64)
+  triton_mm_6 0.0397 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=2, num_warps=4
+  triton_mm_16 0.0405 ms 98.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_15 0.0405 ms 98.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=2, num_warps=8
+  triton_mm_7 0.0409 ms 97.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=8
+  triton_mm_11 0.0412 ms 96.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_12 0.0430 ms 92.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=4, num_warps=4
+  triton_mm_17 0.0436 ms 91.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=5, num_warps=8
+  bias_addmm 0.0444 ms 89.5% 
+  triton_mm_13 0.0447 ms 88.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_9 0.0452 ms 87.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 2.1424 seconds and 0.0048 seconds precompiling for 20 choices
+/opt/conda/lib/python3.11/site-packages/torch/_inductor/lowering.py:1814: UserWarning: Torchinductor does not support code generation for complex operators. Performance may be worse than eager.
+  warnings.warn(
+E0201 11:32:50.871000 14 site-packages/torch/_inductor/select_algorithm.py:1477] [3/0] Exception out of resource: shared memory, Required: 131072, Hardware limit: 101376. Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_root/66/c66ecnlajbxr2wu43m2vxd26fppunwdumhi2mmraradxgfcmvucy.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=5, num_warps=8)
+W0201 11:32:53.048000 14 site-packages/torch/_inductor/select_algorithm.py:1696] [3/0] out of resource: shared memory, Required: 131072, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.
+AUTOTUNE mm(32768x128, 128x256)
+  triton_mm_48 0.0411 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_49 0.0411 ms 99.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=4, num_warps=4
+  triton_mm_54 0.0419 ms 98.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+  triton_mm_44 0.0425 ms 96.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=8
+  triton_mm_45 0.0430 ms 95.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=5, num_warps=4
+  triton_mm_47 0.0456 ms 90.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=4, num_warps=8
+  mm 0.0461 ms 89.0% 
+  triton_mm_52 0.0463 ms 88.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=2, num_warps=8
+  triton_mm_43 0.0470 ms 87.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=64, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=2, num_warps=4
+  triton_mm_53 0.0472 ms 87.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, B_PROLOGUE_CAST_TYPE=None, EVEN_K=True, GROUP_M=8, num_stages=3, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 2.1348 seconds and 0.7262 seconds precompiling for 20 choices

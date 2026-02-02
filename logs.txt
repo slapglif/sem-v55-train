@@ -1,0 +1,310 @@
+data: {"data":"===== Job started at 2026-02-01 19:33:02 =====","timestamp":"2026-02-01T19:33:02Z"}
+
+data: {"data":"","timestamp":"2026-02-01T19:35:06.345Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:06.345Z"}
+
+data: {"data":"[STAGE 1/4] Installing UV...","timestamp":"2026-02-01T19:35:06.345Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:06.345Z"}
+
+data: {"data":"WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.","timestamp":"2026-02-01T19:35:08.689Z"}
+
+data: {"data":"[STAGE 1/4] Done in 2.3s","timestamp":"2026-02-01T19:35:08.712Z"}
+
+data: {"data":"","timestamp":"2026-02-01T19:35:08.712Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:08.712Z"}
+
+data: {"data":"[STAGE 2/4] Installing dependencies via UV...","timestamp":"2026-02-01T19:35:08.712Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:08.712Z"}
+
+data: {"data":"Using Python 3.11.11 environment at: /opt/conda","timestamp":"2026-02-01T19:35:08.770Z"}
+
+data: {"data":"Resolved 51 packages in 396ms","timestamp":"2026-02-01T19:35:09.172Z"}
+
+data: {"data":"Downloading scipy (33.5MiB)","timestamp":"2026-02-01T19:35:09.192Z"}
+
+data: {"data":"Downloading hf-xet (3.2MiB)","timestamp":"2026-02-01T19:35:09.192Z"}
+
+data: {"data":"Downloading pydantic-core (2.0MiB)","timestamp":"2026-02-01T19:35:09.194Z"}
+
+data: {"data":"Downloading tokenizers (3.1MiB)","timestamp":"2026-02-01T19:35:09.196Z"}
+
+data: {"data":"Downloading aiohttp (1.7MiB)","timestamp":"2026-02-01T19:35:09.197Z"}
+
+data: {"data":"Downloading wandb (21.9MiB)","timestamp":"2026-02-01T19:35:09.197Z"}
+
+data: {"data":"Downloading pyarrow (45.3MiB)","timestamp":"2026-02-01T19:35:09.198Z"}
+
+data: {"data":"Downloading pandas (10.7MiB)","timestamp":"2026-02-01T19:35:09.198Z"}
+
+data: {"data":" Downloaded pydantic-core","timestamp":"2026-02-01T19:35:09.406Z"}
+
+data: {"data":" Downloaded tokenizers","timestamp":"2026-02-01T19:35:09.488Z"}
+
+data: {"data":" Downloaded hf-xet","timestamp":"2026-02-01T19:35:09.502Z"}
+
+data: {"data":" Downloaded aiohttp","timestamp":"2026-02-01T19:35:09.512Z"}
+
+data: {"data":" Downloaded wandb","timestamp":"2026-02-01T19:35:10.382Z"}
+
+data: {"data":" Downloaded scipy","timestamp":"2026-02-01T19:35:10.652Z"}
+
+data: {"data":" Downloaded pandas","timestamp":"2026-02-01T19:35:10.674Z"}
+
+data: {"data":" Downloaded pyarrow","timestamp":"2026-02-01T19:35:10.681Z"}
+
+data: {"data":"Prepared 36 packages in 1.50s","timestamp":"2026-02-01T19:35:10.681Z"}
+
+data: {"data":"Uninstalled 1 package in 230ms","timestamp":"2026-02-01T19:35:10.912Z"}
+
+data: {"data":"Installed 36 packages in 306ms","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + aiohappyeyeballs==2.6.1","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + aiohttp==3.13.3","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + aiosignal==1.4.0","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + annotated-types==0.7.0","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + anyio==4.12.1","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + datasets==4.5.0","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + dill==0.4.0","timestamp":"2026-02-01T19:35:11.218Z"}
+
+data: {"data":" + einops==0.8.2","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + frozenlist==1.8.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + gitdb==4.0.12","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + gitpython==3.1.46","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + h11==0.16.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + hf-xet==1.2.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + httpcore==1.0.9","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + httpx==0.28.1","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + huggingface-hub==1.3.5","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + multidict==6.7.1","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + multiprocess==0.70.18","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + pandas==3.0.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + propcache==0.4.1","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + protobuf==6.33.5","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + pyarrow==23.0.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + pydantic==2.12.5","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + pydantic-core==2.41.5","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + python-dateutil==2.9.0.post0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + scipy==1.17.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + sentry-sdk==2.51.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + shellingham==1.5.4","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + smmap==5.0.2","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + tokenizers==0.22.2","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + typer-slim==0.21.1","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" - typing-extensions==4.12.2 (from file:///home/conda/feedstock_root/build_artifacts/typing_extensions_1733188668063/work)","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + typing-extensions==4.15.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + typing-inspection==0.4.2","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + wandb==0.24.1","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + xxhash==3.6.0","timestamp":"2026-02-01T19:35:11.219Z"}
+
+data: {"data":" + yarl==1.22.0","timestamp":"2026-02-01T19:35:11.220Z"}
+
+data: {"data":"[STAGE 2/4] Done in 2.5s","timestamp":"2026-02-01T19:35:11.254Z"}
+
+data: {"data":"","timestamp":"2026-02-01T19:35:11.254Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:11.254Z"}
+
+data: {"data":"[STAGE 3/4] Downloading model repo...","timestamp":"2026-02-01T19:35:11.254Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:11.254Z"}
+
+data: {"data":"\rFetching 119 files:   0%|          | 0/119 [00:00<?, ?it/s]\rFetching 119 files:  17%|█▋        | 20/119 [00:00<00:00, 160.96it/s]\rFetching 119 files:  43%|████▎     | 51/119 [00:00<00:00, 235.24it/s]\rFetching 119 files:  64%|██████▍   | 76/119 [00:00<00:00, 240.10it/s]\rFetching 119 files:  85%|████████▍ | 101/119 [00:00<00:00, 242.78it/s]\rFetching 119 files: 100%|██████████| 119/119 [00:00<00:00, 223.50it/s]","timestamp":"2026-02-01T19:35:12.507Z"}
+
+data: {"data":"[STAGE 3/4] Repo downloaded to /root/.cache/huggingface/hub/models--icarus112--sem-v55-lean-crystal/snapshots/32726745622cbee291e252d068b3634d0d562406 in 1.3s","timestamp":"2026-02-01T19:35:12.576Z"}
+
+data: {"data":"","timestamp":"2026-02-01T19:35:12.576Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:12.576Z"}
+
+data: {"data":"[STAGE 4/4] Starting training...","timestamp":"2026-02-01T19:35:12.576Z"}
+
+data: {"data":"==============================","timestamp":"2026-02-01T19:35:12.576Z"}
+
+data: {"data":"19:35:14 [INFO] ============================================================","timestamp":"2026-02-01T19:35:14.066Z"}
+
+data: {"data":"19:35:14 [INFO] SEM V5.5 Training - System Info","timestamp":"2026-02-01T19:35:14.067Z"}
+
+data: {"data":"19:35:14 [INFO] ============================================================","timestamp":"2026-02-01T19:35:14.067Z"}
+
+data: {"data":"19:35:14 [INFO] PyTorch: 2.6.0+cu124","timestamp":"2026-02-01T19:35:14.067Z"}
+
+data: {"data":"19:35:14 [INFO] CUDA available: True","timestamp":"2026-02-01T19:35:14.097Z"}
+
+data: {"data":"19:35:14 [INFO] CUDA version: 12.4","timestamp":"2026-02-01T19:35:14.097Z"}
+
+data: {"data":"19:35:14 [INFO] GPU: NVIDIA A10G","timestamp":"2026-02-01T19:35:14.113Z"}
+
+data: {"data":"19:35:14 [INFO] VRAM: 22.3GB","timestamp":"2026-02-01T19:35:14.113Z"}
+
+data: {"data":"19:35:14 [INFO] SM count: 80","timestamp":"2026-02-01T19:35:14.113Z"}
+
+data: {"data":"19:35:14 [INFO] bf16 supported: True","timestamp":"2026-02-01T19:35:14.113Z"}
+
+data: {"data":"19:35:14 [INFO] CPU cores: 8","timestamp":"2026-02-01T19:35:14.114Z"}
+
+data: {"data":"19:35:14 [INFO] ============================================================","timestamp":"2026-02-01T19:35:14.114Z"}
+
+data: {"data":"19:35:14 [INFO] GPU: NVIDIA A10G (22.3GB)","timestamp":"2026-02-01T19:35:14.186Z"}
+
+data: {"data":"19:35:14 [INFO] Device: cuda","timestamp":"2026-02-01T19:35:14.186Z"}
+
+data: {"data":"19:35:14 [INFO] Config: configs/a100_optimized.yaml","timestamp":"2026-02-01T19:35:14.186Z"}
+
+data: {"data":"19:35:14 [INFO] micro_batch=8, batch=512, accum=64","timestamp":"2026-02-01T19:35:14.186Z"}
+
+data: {"data":"19:35:14 [INFO] Building SEM V5.5 model...","timestamp":"2026-02-01T19:35:14.186Z"}
+
+data: {"data":"19:35:14 [INFO] Parameters: 27,542,120 effective real","timestamp":"2026-02-01T19:35:14.735Z"}
+
+data: {"data":"19:35:14 [INFO] torch.compile disabled (--no-compile)","timestamp":"2026-02-01T19:35:14.735Z"}
+
+data: {"data":"19:35:14 [INFO] AMP enabled with bf16 (native tensor core support)","timestamp":"2026-02-01T19:35:14.735Z"}
+
+data: {"data":"19:35:19 [WARNING] wandb init failed: No API key configured. Use `wandb login` to log in., disabling","timestamp":"2026-02-01T19:35:19.964Z"}
+
+data: {"data":"19:35:20 [INFO] Gradient checkpointing enabled on 8 Mamba layers","timestamp":"2026-02-01T19:35:20.034Z"}
+
+data: {"data":"19:35:20 [INFO] Model build time: 5.8s","timestamp":"2026-02-01T19:35:20.034Z"}
+
+data: {"data":"19:35:20 [INFO] SEM V5.5 'Lean Crystal' Training","timestamp":"2026-02-01T19:35:20.034Z"}
+
+data: {"data":"19:35:20 [INFO] Device: cuda","timestamp":"2026-02-01T19:35:20.034Z"}
+
+data: {"data":"19:35:20 [INFO] Effective batch size: 512 (micro=8 x accum=64)","timestamp":"2026-02-01T19:35:20.034Z"}
+
+data: {"data":"19:35:20 [INFO] Curriculum: 3 stages","timestamp":"2026-02-01T19:35:20.034Z"}
+
+data: {"data":"19:35:20 [INFO] Starting stage 0: seq_len=1024, min_score=2","timestamp":"2026-02-01T19:35:20.035Z"}
+
+data: {"data":"19:35:20 [INFO] [TRAIN] Building dataloader...","timestamp":"2026-02-01T19:35:20.036Z"}
+
+data: {"data":"19:35:20 [INFO] [DATA] DataLoader created in 0.000s (batch_size=8, workers=4, pin_memory=True)","timestamp":"2026-02-01T19:35:20.036Z"}
+
+data: {"data":"19:35:20 [INFO] [TRAIN] Creating data iterator...","timestamp":"2026-02-01T19:35:20.036Z"}
+
+data: {"data":"19:35:20 [INFO] [TRAIN] Starting training loop (max_steps=100000)...","timestamp":"2026-02-01T19:35:20.093Z"}
+
+data: {"data":"19:35:20 [INFO] ============================================================","timestamp":"2026-02-01T19:35:20.093Z"}
+
+data: {"data":"19:35:20 [INFO] [TRAIN] Loading first batch...","timestamp":"2026-02-01T19:35:20.094Z"}
+
+data: {"data":"19:35:20 [INFO] [PACK] Starting sequence packing (seq_len=1024)...","timestamp":"2026-02-01T19:35:20.097Z"}
+
+data: {"data":"19:35:20 [INFO] [PACK] Starting sequence packing (seq_len=1024)...","timestamp":"2026-02-01T19:35:20.098Z"}
+
+data: {"data":"19:35:20 [INFO] [PACK] Starting sequence packing (seq_len=1024)...","timestamp":"2026-02-01T19:35:20.098Z"}
+
+data: {"data":"19:35:20 [INFO] [PACK] Starting sequence packing (seq_len=1024)...","timestamp":"2026-02-01T19:35:20.104Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu","timestamp":"2026-02-01T19:35:22.033Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Split: train, min_score: 2","timestamp":"2026-02-01T19:35:22.033Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Using HF_TOKEN from environment","timestamp":"2026-02-01T19:35:22.034Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu","timestamp":"2026-02-01T19:35:22.034Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Split: train, min_score: 2","timestamp":"2026-02-01T19:35:22.034Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Using HF_TOKEN from environment","timestamp":"2026-02-01T19:35:22.034Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu","timestamp":"2026-02-01T19:35:22.035Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Split: train, min_score: 2","timestamp":"2026-02-01T19:35:22.035Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Using HF_TOKEN from environment","timestamp":"2026-02-01T19:35:22.035Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu","timestamp":"2026-02-01T19:35:22.056Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Split: train, min_score: 2","timestamp":"2026-02-01T19:35:22.056Z"}
+
+data: {"data":"19:35:22 [INFO] [DATA] Using HF_TOKEN from environment","timestamp":"2026-02-01T19:35:22.056Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Dataset loaded in 1.02s","timestamp":"2026-02-01T19:35:23.081Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Filtering by min_score >= 2","timestamp":"2026-02-01T19:35:23.081Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Shuffling with buffer_size=50000","timestamp":"2026-02-01T19:35:23.082Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Pipeline setup: load=1.024s filter=0.002s shuffle=0.002s","timestamp":"2026-02-01T19:35:23.084Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Waiting for first document from stream...","timestamp":"2026-02-01T19:35:23.084Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Dataset loaded in 1.05s","timestamp":"2026-02-01T19:35:23.088Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Filtering by min_score >= 2","timestamp":"2026-02-01T19:35:23.088Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Dataset loaded in 1.05s","timestamp":"2026-02-01T19:35:23.088Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Filtering by min_score >= 2","timestamp":"2026-02-01T19:35:23.089Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Shuffling with buffer_size=50000","timestamp":"2026-02-01T19:35:23.090Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Shuffling with buffer_size=50000","timestamp":"2026-02-01T19:35:23.090Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Pipeline setup: load=1.054s filter=0.002s shuffle=0.003s","timestamp":"2026-02-01T19:35:23.092Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Pipeline setup: load=1.055s filter=0.002s shuffle=0.002s","timestamp":"2026-02-01T19:35:23.092Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Waiting for first document from stream...","timestamp":"2026-02-01T19:35:23.093Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Waiting for first document from stream...","timestamp":"2026-02-01T19:35:23.093Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Dataset loaded in 1.09s","timestamp":"2026-02-01T19:35:23.123Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Filtering by min_score >= 2","timestamp":"2026-02-01T19:35:23.123Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Shuffling with buffer_size=50000","timestamp":"2026-02-01T19:35:23.124Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Pipeline setup: load=1.088s filter=0.001s shuffle=0.002s","timestamp":"2026-02-01T19:35:23.126Z"}
+
+data: {"data":"19:35:23 [INFO] [DATA] Waiting for first document from stream...","timestamp":"2026-02-01T19:35:23.126Z"}
+
+data: {"data":"19:35:29 [INFO] [DATA] First doc received (6.1s)","timestamp":"2026-02-01T19:35:29.163Z"}
+
+data: {"data":"19:35:29 [INFO] [TRAIN] First batch loaded successfully!","timestamp":"2026-02-01T19:35:29.365Z"}
+
+data: {"data":"19:35:29 [INFO] [DATA] First doc received (6.3s)","timestamp":"2026-02-01T19:35:29.404Z"}
+
+data: {"data":"19:35:29 [INFO] [DATA] First doc received (6.6s)","timestamp":"2026-02-01T19:35:29.673Z"}
+
+data: {"data":"19:35:30 [INFO] [DATA] First doc received (7.1s)","timestamp":"2026-02-01T19:35:30.158Z"}
+

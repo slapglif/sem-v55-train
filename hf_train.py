@@ -57,7 +57,19 @@ def detect_device_and_tune(config):
             config.training.num_workers = 2
         return device
     elif hasattr(torch, "xpu") and torch.xpu.is_available():
-        return "xpu"
+        device = "xpu"
+        gpu_name = torch.xpu.get_device_name(0)
+        gpu_mem_gb = torch.xpu.get_device_properties(0).total_memory / 1024**3
+        logger.info(f"XPU: {gpu_name} ({gpu_mem_gb:.1f}GB)")
+
+        # XPU-specific tuning (similar to CUDA but conservative)
+        if gpu_mem_gb >= 16:
+            config.training.micro_batch_size = 8
+            config.training.num_workers = 4
+        else:
+            config.training.micro_batch_size = 4
+            config.training.num_workers = 2
+        return device
     return "cpu"
 
 
@@ -75,6 +87,14 @@ def print_system_info():
         logger.info(f"VRAM: {vram / 1024**3:.1f}GB")
         logger.info(f"SM count: {props.multi_processor_count}")
         logger.info(f"bf16 supported: {torch.cuda.is_bf16_supported()}")
+    elif hasattr(torch, "xpu") and torch.xpu.is_available():
+        logger.info(f"XPU available: True")
+        logger.info(f"XPU version: {torch.xpu.xpu_version}")
+        logger.info(f"GPU: {torch.xpu.get_device_name(0)}")
+        props = torch.xpu.get_device_properties(0)
+        logger.info(f"VRAM: {props.total_memory / 1024**3:.1f}GB")
+        logger.info(f"EUs: {props.execution_units}")
+        logger.info(f"bf16 supported: True (Intel XPU)")
     logger.info(f"CPU cores: {os.cpu_count()}")
     logger.info("=" * 60)
 
@@ -89,6 +109,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--micro-batch", type=int, default=None)
     parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--max-aggression", action="store_true")
     parser.add_argument(
         "--no-compile",
         action="store_true",
@@ -113,6 +134,7 @@ def main():
 
     from sem.config import SEMConfig
     from sem.training.trainer import SEMTrainer
+    from sem.train import apply_max_aggression
 
     config = SEMConfig.from_yaml(args.config)
 
@@ -123,6 +145,8 @@ def main():
         config.training.max_steps = args.max_steps
 
     device = args.device or detect_device_and_tune(config)
+    if args.max_aggression:
+        apply_max_aggression(config, device)
 
     logger.info(f"Device: {device}")
     logger.info(f"Config: {args.config}")

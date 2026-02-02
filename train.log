@@ -1,0 +1,20 @@
+02:20:14 [INFO] CPU optimized: 8 threads, oneDNN enabled
+02:20:14 [INFO] Applying 'Max Aggression' RAM tuning for cpu (16GB RAM / 8GB VRAM)
+02:20:14 [INFO]   -> micro_batch_size: 8
+02:20:14 [INFO]   -> batch_size: 64
+02:20:14 [INFO]   -> num_workers: 8
+02:20:14 [INFO] Building SEM V5.5 model...
+02:20:15 [INFO] Parameters: 29,918,896 effective real
+02:20:22 [INFO] torch.compile enabled for CPU (Inductor, reduce-overhead)
+02:20:22 [WARNING] wandb not installed, disabling logging
+02:20:22 [INFO] Gradient checkpointing enabled on 16 Mamba layers
+02:20:22 [INFO] SEM V5.5 'Lean Crystal' Training
+02:20:22 [INFO] Device: cpu
+02:20:22 [INFO] Effective batch size: 64 (micro=8 x accum=8)
+02:20:22 [INFO] Curriculum: 2 stages
+02:20:22 [INFO] Starting stage 0: seq_len=1024, min_score=3
+02:20:22 [INFO] [TRAIN] Building dataloader...
+02:20:22 [INFO] [TRAIN] Creating data iterator...
+02:20:22 [INFO] [TRAIN] Starting training loop (max_steps=100000)...
+02:20:22 [INFO] ============================================================
+02:20:22 [INFO] [TRAIN] Loading first batch...

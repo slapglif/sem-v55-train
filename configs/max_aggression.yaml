@@ -24,7 +24,7 @@ spinor:
 
 propagator:
   cayley_dt: 0.1
-  cg_max_iter: 40          # Higher precision for aggressive training
+  cg_max_iter: 3           # Fast training (3 iterations sufficient)
   cg_tol: 1.0e-7
   nonlinear_alpha: 0.1
   laplacian_sparsity: 8

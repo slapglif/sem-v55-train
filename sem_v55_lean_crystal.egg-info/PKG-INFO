@@ -1,0 +1,23 @@
+Metadata-Version: 2.4
+Name: sem-v55-lean-crystal
+Version: 5.5.0
+Summary: Signal-Entropic Model V5.5 - Lean Crystal Architecture
+Requires-Python: >=3.10
+Requires-Dist: torch>=2.2.0
+Requires-Dist: scipy>=1.11.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: einops>=0.7.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-benchmark; extra == "dev"
+Requires-Dist: matplotlib; extra == "dev"
+Provides-Extra: training
+Requires-Dist: datasets>=2.16.0; extra == "training"
+Requires-Dist: tokenizers>=0.15.0; extra == "training"
+Requires-Dist: transformers>=4.36.0; extra == "training"
+Requires-Dist: tqdm>=4.66.0; extra == "training"
+Provides-Extra: cuda
+Requires-Dist: triton>=2.1.0; extra == "cuda"
+Provides-Extra: tracking
+Requires-Dist: wandb>=0.16.0; extra == "tracking"

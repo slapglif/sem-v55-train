@@ -1,0 +1,77 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 106 files:   0%|          | 0/106 [00:00<?, ?it/s]Fetching 106 files:  14%|█▍        | 15/106 [00:00<00:00, 100.36it/s]Fetching 106 files:  55%|█████▍    | 58/106 [00:00<00:00, 259.27it/s]Fetching 106 files:  82%|████████▏ | 87/106 [00:00<00:00, 257.30it/s]Fetching 106 files: 100%|██████████| 106/106 [00:00<00:00, 235.56it/s]
+12:01:15 [INFO] ============================================================
+12:01:15 [INFO] SEM V5.5 Training - System Info
+12:01:15 [INFO] ============================================================
+12:01:15 [INFO] PyTorch: 2.6.0+cu124
+12:01:15 [INFO] CUDA available: True
+12:01:15 [INFO] CUDA version: 12.4
+12:01:15 [INFO] GPU: NVIDIA L40S
+12:01:15 [INFO] VRAM: 44.4GB
+12:01:15 [INFO] SM count: 142
+12:01:15 [INFO] bf16 supported: True
+12:01:15 [INFO] CPU cores: 8
+12:01:15 [INFO] ============================================================
+12:01:15 [INFO] GPU: NVIDIA L40S (44.4GB)
+12:01:15 [INFO] Device: cuda
+12:01:15 [INFO] Config: configs/a100_optimized.yaml
+12:01:15 [INFO] micro_batch=16, batch=512, accum=32
+12:01:15 [INFO] DRY RUN: 20 steps, real streaming data, full timing
+12:01:15 [INFO] Building SEM V5.5 model...
+12:01:16 [INFO] Parameters: 27,542,120 effective real
+12:01:17 [INFO] torch.compile enabled for CUDA (default)
+12:01:17 [INFO] AMP enabled with bf16 (native tensor core support)
+12:01:18 [INFO] Gradient checkpointing enabled on 8 Mamba layers
+12:01:18 [INFO] Model build time: 2.2s
+12:01:18 [INFO] SEM V5.5 'Lean Crystal' Training
+12:01:18 [INFO] Device: cuda
+12:01:18 [INFO] Effective batch size: 512 (micro=8 x accum=64)
+12:01:18 [INFO] [TRAIN] Building dataloader...
+12:01:18 [INFO] [DATA] DataLoader created in 0.000s (batch_size=8, workers=4, pin_memory=True)
+12:01:18 [INFO] [TRAIN] Creating data iterator...
+12:01:18 [INFO] [TRAIN] Starting training loop (max_steps=20)...
+12:01:18 [INFO] ============================================================
+12:01:18 [INFO] [TRAIN] Loading first batch...
+12:01:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+12:01:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+12:01:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+12:01:18 [INFO] [PACK] Starting sequence packing (seq_len=2048)...
+12:01:18 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+12:01:18 [INFO] [DATA] Split: train, min_score: 2
+12:01:18 [INFO] [DATA] Using HF_TOKEN from environment
+12:01:18 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+12:01:18 [INFO] [DATA] Split: train, min_score: 2
+12:01:18 [INFO] [DATA] Using HF_TOKEN from environment
+12:01:18 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+12:01:18 [INFO] [DATA] Split: train, min_score: 2
+12:01:18 [INFO] [DATA] Using HF_TOKEN from environment
+12:01:18 [INFO] [DATA] Starting FineWeb-Edu stream from HuggingFaceFW/fineweb-edu
+12:01:18 [INFO] [DATA] Split: train, min_score: 2
+12:01:18 [INFO] [DATA] Using HF_TOKEN from environment
+12:01:19 [INFO] [DATA] Dataset loaded in 0.89s
+12:01:19 [INFO] [DATA] Filtering by min_score >= 2
+12:01:19 [INFO] [DATA] Shuffling with buffer_size=50000
+12:01:19 [INFO] [DATA] Pipeline setup: load=0.887s filter=0.001s shuffle=0.001s
+12:01:19 [INFO] [DATA] Waiting for first document from stream...
+12:01:19 [INFO] [DATA] Dataset loaded in 1.13s
+12:01:19 [INFO] [DATA] Filtering by min_score >= 2
+12:01:20 [INFO] [DATA] Shuffling with buffer_size=50000
+12:01:20 [INFO] [DATA] Pipeline setup: load=1.135s filter=0.128s shuffle=0.001s
+12:01:20 [INFO] [DATA] Waiting for first document from stream...
+12:01:20 [INFO] [DATA] Dataset loaded in 2.18s
+12:01:20 [INFO] [DATA] Filtering by min_score >= 2
+12:01:20 [INFO] [DATA] Shuffling with buffer_size=50000
+12:01:20 [INFO] [DATA] Pipeline setup: load=2.180s filter=0.001s shuffle=0.002s
+12:01:20 [INFO] [DATA] Waiting for first document from stream...
+12:01:21 [INFO] [DATA] Dataset loaded in 2.35s
+12:01:21 [INFO] [DATA] Filtering by min_score >= 2
+12:01:21 [INFO] [DATA] Shuffling with buffer_size=50000
+12:01:21 [INFO] [DATA] Pipeline setup: load=2.354s filter=0.001s shuffle=0.002s
+12:01:21 [INFO] [DATA] Waiting for first document from stream...
+12:01:24 [INFO] [DATA] First doc received (4.1s)
+12:01:24 [INFO] [DATA] First doc received (4.7s)
+12:01:25 [INFO] [DATA] First doc received (4.3s)
+12:01:25 [INFO] [DATA] First doc received (4.6s)
+12:01:25 [INFO] [TRAIN] First batch loaded successfully!
+/opt/conda/lib/python3.11/site-packages/torch/_inductor/lowering.py:1814: UserWarning: Torchinductor does not support code generation for complex operators. Performance may be worse than eager.
+  warnings.warn(

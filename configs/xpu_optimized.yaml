@@ -1,0 +1,83 @@
+# SEM V5.5 "Lean Crystal" - XPU Optimized (8GB Intel Arc)
+# Tested: batch=2, seq=512, 272 tok/s, ~3.7s/step
+
+model:
+  hidden_dim: 256
+  num_layers: 8
+  vocab_size: 32768
+  max_seq_length: 512
+
+encoder:
+  sdr_sparsity: 32
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.05
+  sinkhorn_max_iter: 50
+  sinkhorn_tol: 1.0e-3
+
+spinor:
+  block_size: 8
+  num_blocks: 32
+  state_dim: 64
+  mimo_groups: 8
+  d_conv: 4
+
+propagator:
+  cayley_dt: 0.1
+  cg_max_iter: 5
+  cg_tol: 1.0e-6
+  nonlinear_alpha: 0.1
+  laplacian_sparsity: 5
+  lazy_cg: true
+  lazy_cg_tol: 1.0e-6
+
+quantizer:
+  codebook_size: 256
+  group_size: 2
+  fisher_ema_decay: 0.99
+  outlier_percentile: 0.01
+  dead_code_threshold: 100
+
+sampler:
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+training:
+  batch_size: 32
+  micro_batch_size: 2
+  gradient_checkpointing: true
+  dtype: float32
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 2000
+  max_steps: 100000
+  gradient_clip: 1.0
+  dataset_name: "HuggingFaceFW/fineweb-edu"
+  tokenizer_path: "tokenizer/"
+  num_workers: 0
+  shuffle_buffer_size: 1000
+  scheduler_type: "wsd"
+  stable_steps: 0
+  decay_steps: 5000
+  lr_min_ratio: 0.1
+  log_interval: 5
+  health_check_interval: 100
+  checkpoint_interval: 5000
+  keep_checkpoints: 3
+  wandb_project: "sem-v55-xpu"
+  wandb_enabled: false
+  timing_enabled: true
+  timing_log_interval: 10
+
+curriculum:
+  enabled: true
+  stages:
+    - min_score: 2
+      seq_len: 512
+      min_steps: 20000
+    - min_score: 3
+      seq_len: 512
+      min_steps: 30000
+
+distillation:
+  enabled: false

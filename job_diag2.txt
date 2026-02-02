@@ -1,0 +1,19 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Fetching 107 files:   0%|          | 0/107 [00:00<?, ?it/s]Fetching 107 files:  16%|█▌        | 17/107 [00:00<00:00, 122.73it/s]Fetching 107 files:  42%|████▏     | 45/107 [00:00<00:00, 148.21it/s]Fetching 107 files:  56%|█████▌    | 60/107 [00:00<00:00, 110.73it/s]Fetching 107 files:  90%|████████▉ | 96/107 [00:00<00:00, 132.92it/s]Fetching 107 files: 100%|██████████| 107/107 [00:00<00:00, 145.43it/s]
+Device: cuda
+PyTorch: 2.6.0+cu124
+After encoder: psi.abs().mean()=0.043853, psi.abs().max()=0.088607
+After mamba[0]: psi.abs().mean()=0.204452, psi.abs().max()=0.778704
+After mamba[1]: psi.abs().mean()=0.255708, psi.abs().max()=0.906951
+After mamba[2]: psi.abs().mean()=0.309370, psi.abs().max()=1.141141
+After mamba[3]: psi.abs().mean()=0.360452, psi.abs().max()=1.207089
+After mamba[4]: psi.abs().mean()=0.414472, psi.abs().max()=1.422551
+After mamba[5]: psi.abs().mean()=0.452944, psi.abs().max()=1.424593
+After mamba[6]: psi.abs().mean()=0.477623, psi.abs().max()=1.685716
+After mamba[7]: psi.abs().mean()=0.503435, psi.abs().max()=2.002098
+After propagator: psi.abs().mean()=0.718291, psi.abs().max()=2.564188
+After final_norm: psi.abs().mean()=0.889447, psi.abs().max()=3.125031
+amp_sq: min=1.404481e-07, max=9.986758e+00, mean=6.692651e-01
+amp_sq_sum: 21930.4766
+loss: 47970300.0000
+unitary_divergence: 479703008.0000
