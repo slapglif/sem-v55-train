@@ -146,6 +146,19 @@ class CayleySolitonPropagator(nn.Module):
             out_r, out_i = a_minus_matvec((vr, vi))
             return torch.stack([out_r, out_i], dim=-1)
 
+        # SEOP Fix 28: Block-Jacobi preconditioner for CG convergence.
+        # A_minus = [[I, d*H], [-d*H, I]] per-dim 2x2 block inverse is O(D).
+        # Without this, growing Hamiltonian eigenvalues make CG diverge.
+        diag_H = self.hamiltonian.get_diagonal().real
+        d_k = half_dt * diag_H
+        inv_s2 = 1.0 / (1.0 + d_k * d_k)
+
+        def block_jacobi_precond(v_real_block):
+            vr, vi = v_real_block.unbind(-1)
+            out_r = (vr - d_k * vi) * inv_s2
+            out_i = (d_k * vr + vi) * inv_s2
+            return torch.stack([out_r, out_i], dim=-1)
+
         B, S, _ = rhs_r.shape
         rhs_real_block = torch.stack([rhs_r, rhs_i], dim=-1).reshape(-1, D, 2)
 
@@ -194,6 +207,7 @@ class CayleySolitonPropagator(nn.Module):
                 rhs_real_block,
                 self.cg_max_iter,
                 self.cg_tol,
+                precond=block_jacobi_precond,
                 x0=x0,
             )
             if _t:

@@ -24,7 +24,7 @@ spinor:
 
 propagator:
   cayley_dt: 0.01
-  cg_max_iter: 20
+  cg_max_iter: 50
   cg_tol: 1.0e-5
   nonlinear_alpha: 0.01
   laplacian_sparsity: 8
