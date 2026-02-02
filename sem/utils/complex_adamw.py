@@ -1,21 +1,26 @@
-"""Complex-aware AdamW optimizer.
+"""Thermodynamic Complex-aware AdamW optimizer.
 
-PyTorch's built-in AdamW works with complex parameters via Wirtinger
-calculus, but we provide explicit handling for better numerical behavior
-with phase-encoded representations.
+Integrates principles from Thermodynamic Natural Gradient Descent (TNGD)
+by treating the optimization as an Ornstein-Uhlenbeck process at
+equilibrium.
+
+Ref: https://www.nature.com/articles/s44335-025-00049-x
 """
 
 import torch
 from torch.optim import Optimizer
 from torch import Tensor
 import math
+from typing import Optional
 
 
 class ComplexAdamW(Optimizer):
-    """AdamW optimizer with explicit complex parameter support.
+    """Thermodynamic AdamW with explicit complex parameter support.
 
-    Handles complex parameters by operating on real and imaginary
-    parts with coupled momentum, ensuring phase-coherent updates.
+    Implements a hybrid digital-analog inspired optimization loop:
+    1. Preconditions gradients with the diagonal Fisher Information Matrix (Adam v_t).
+    2. Inject thermodynamic noise (Langevin dynamics) to sample the
+       equilibrium distribution of the natural gradient.
     """
 
     def __init__(
@@ -25,8 +30,15 @@ class ComplexAdamW(Optimizer):
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0.01,
+        temperature: float = 1e-4,  # Thermodynamic noise scale
     ):
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            temperature=temperature,
+        )
         super().__init__(params, defaults)
 
     @torch.no_grad()
@@ -35,7 +47,7 @@ class ComplexAdamW(Optimizer):
         loss = None
         if closure is not None:
             with torch.enable_grad():
-                loss = closure()
+                loss = float(closure())
 
         processed = set()
         for group in self.param_groups:
@@ -43,6 +55,7 @@ class ComplexAdamW(Optimizer):
             beta1, beta2 = group["betas"]
             eps = group["eps"]
             weight_decay = group["weight_decay"]
+            temperature = group["temperature"]
 
             for p in group["params"]:
                 if p in processed or p.grad is None:
@@ -59,8 +72,15 @@ class ComplexAdamW(Optimizer):
                             else p
                         )
 
-                        self._coupled_adam_step(
-                            p_real, p_imag, lr, beta1, beta2, eps, weight_decay
+                        self._coupled_thermodynamic_step(
+                            p_real,
+                            p_imag,
+                            lr,
+                            beta1,
+                            beta2,
+                            eps,
+                            weight_decay,
+                            temperature,
                         )
                         processed.add(p_real)
                         processed.add(p_imag)
@@ -68,11 +88,9 @@ class ComplexAdamW(Optimizer):
 
                 # Existing complex64 support
                 if p.is_complex():
-                    # For complex params, work with the view_as_real representation
-                    # This ensures coupled real/imag momentum
                     p_view = torch.view_as_real(p)
                     g_view = torch.view_as_real(p.grad)
-                    self._adam_step(
+                    self._thermodynamic_step(
                         p_view,
                         g_view,
                         lr,
@@ -80,17 +98,20 @@ class ComplexAdamW(Optimizer):
                         beta2,
                         eps,
                         weight_decay,
+                        temperature,
                         p,
                         coupled=True,
                     )
                 else:
-                    self._adam_step(p, p.grad, lr, beta1, beta2, eps, weight_decay, p)
+                    self._thermodynamic_step(
+                        p, p.grad, lr, beta1, beta2, eps, weight_decay, temperature, p
+                    )
 
                 processed.add(p)
 
         return loss
 
-    def _coupled_adam_step(
+    def _coupled_thermodynamic_step(
         self,
         p_real: Tensor,
         p_imag: Tensor,
@@ -99,9 +120,13 @@ class ComplexAdamW(Optimizer):
         beta2: float,
         eps: float,
         weight_decay: float,
+        temperature: float,
     ):
-        """AdamW step for a pair of real/imag parameters with coupled momentum."""
+        """AdamW step with coupled momentum and thermodynamic noise."""
         grad_real, grad_imag = p_real.grad, p_imag.grad
+        if grad_real is None or grad_imag is None:
+            return
+
         state_real = self.state[p_real]
         state_imag = self.state[p_imag]
 
@@ -114,7 +139,6 @@ class ComplexAdamW(Optimizer):
         if len(state_imag) == 0:
             state_imag["step"] = 0
             state_imag["exp_avg"] = torch.zeros_like(p_imag)
-            # Share the exp_avg_sq tensor to ensure coupled behavior
             state_imag["exp_avg_sq"] = state_real["exp_avg_sq"]
 
         state_real["step"] += 1
@@ -130,10 +154,7 @@ class ComplexAdamW(Optimizer):
         state_real["exp_avg"].mul_(beta1).add_(grad_real, alpha=1 - beta1)
         state_imag["exp_avg"].mul_(beta1).add_(grad_imag, alpha=1 - beta1)
 
-        # Coupled Second Momentum update (v_t = beta2 * v_{t-1} + (1-beta2) * |g|^2)
-        # Note: |g|^2 = grad_real^2 + grad_imag^2
-        # Since state_imag['exp_avg_sq'] is the same tensor as state_real['exp_avg_sq'],
-        # we only update it once.
+        # Coupled Second Momentum update (diagonal Fisher estimate)
         grad_sq = grad_real.pow(2) + grad_imag.pow(2)
         state_real["exp_avg_sq"].mul_(beta2).add_(grad_sq, alpha=1 - beta2)
 
@@ -142,16 +163,26 @@ class ComplexAdamW(Optimizer):
         bias_correction2 = 1 - beta2**step
         step_size = lr / bias_correction1
 
-        # Denominator uses shared v_t
+        # Denominator (Preconditioner)
         denom = (state_real["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)).add_(
             eps
         )
 
-        # Apply updates
+        # Apply updates (Natural Gradient Step)
         p_real.addcdiv_(state_real["exp_avg"], denom, value=-step_size)
         p_imag.addcdiv_(state_imag["exp_avg"], denom, value=-step_size)
 
-    def _adam_step(
+        # TNGD Factoring: Inject Thermodynamic Noise (Langevin Dynamics)
+        if temperature > 0:
+            noise_scale = math.sqrt(2 * temperature * lr)
+            noise_r = torch.randn_like(p_real) * noise_scale
+            noise_i = torch.randn_like(p_imag) * noise_scale
+
+            # Stay in natural gradient geometry
+            p_real.add_(noise_r / denom.sqrt())
+            p_imag.add_(noise_i / denom.sqrt())
+
+    def _thermodynamic_step(
         self,
         param_view: Tensor,
         grad_view: Tensor,
@@ -160,20 +191,17 @@ class ComplexAdamW(Optimizer):
         beta2: float,
         eps: float,
         weight_decay: float,
+        temperature: float,
         original_param: Tensor,
         coupled: bool = False,
     ):
-        """Core AdamW step on a (possibly real view of complex) parameter."""
+        """Core AdamW step with thermodynamic noise."""
         state = self.state[original_param]
 
         if len(state) == 0:
             state["step"] = 0
             state["exp_avg"] = torch.zeros_like(grad_view)
             state["exp_avg_sq"] = torch.zeros_like(grad_view)
-            if coupled:
-                # If coupled, exp_avg_sq will store a single value per complex pair
-                # Shape (..., 2) -> (..., 1) for broadcast or just keep (..., 2) and fill both
-                pass
 
         state["step"] += 1
         exp_avg = state["exp_avg"]
@@ -188,11 +216,8 @@ class ComplexAdamW(Optimizer):
         exp_avg.mul_(beta1).add_(grad_view, alpha=1 - beta1)
 
         if coupled:
-            # For complex params, we want phase-coherent updates: share v_t between re/im
-            # |g|^2 = sum(g_i^2) across the last dimension (re/im)
             grad_sq = grad_view.pow(2).sum(dim=-1, keepdim=True)
             exp_avg_sq.mul_(beta2).add_(grad_sq, alpha=1 - beta2)
-            # exp_avg_sq is (..., 1), will broadcast to (..., 2) in addcdiv
         else:
             exp_avg_sq.mul_(beta2).addcmul_(grad_view, grad_view, value=1 - beta2)
 
@@ -204,3 +229,9 @@ class ComplexAdamW(Optimizer):
         denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
         param_view.addcdiv_(exp_avg, denom, value=-step_size)
+
+        # TNGD Noise injection
+        if temperature > 0:
+            noise_scale = math.sqrt(2 * temperature * lr)
+            noise = torch.randn_like(param_view) * noise_scale
+            param_view.add_(noise / denom.sqrt())

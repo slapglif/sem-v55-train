@@ -121,6 +121,7 @@ class SEMTrainer:
             self.model.parameters(),
             lr=config.training.learning_rate,
             weight_decay=config.training.weight_decay,
+            temperature=1e-4,  # Thermodynamic noise for TNGD
         )
 
         # Scheduler
