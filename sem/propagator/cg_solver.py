@@ -51,6 +51,8 @@ class CGSolverFunction(Function):
         return grad_rhs, grad_A, None, None
 
 
+@torch.amp.autocast("cuda", enabled=False)
+@torch.amp.autocast("cpu", enabled=False)
 def _cg_solve(
     A: Any,
     b: Tensor,
@@ -60,6 +62,9 @@ def _cg_solve(
     x0: Optional[Tensor] = None,
 ) -> Tensor:
     """Conjugate Gradient solver for Hermitian positive definite systems."""
+    b = b.float() if not torch.is_complex(b) else b.to(torch.complex64)
+    if x0 is not None:
+        x0 = x0.float() if not torch.is_complex(x0) else x0.to(torch.complex64)
     is_complex = torch.is_complex(b)
     b_real = torch.view_as_real(b) if is_complex else b
 
@@ -169,6 +174,10 @@ def cg_solve_sparse(
     Returns:
         x: [..., D] complex64 solution
     """
+    b = b.float() if not torch.is_complex(b) else b.to(torch.complex64)
+    if x0 is not None:
+        x0 = x0.float() if not torch.is_complex(x0) else x0.to(torch.complex64)
+
     with torch.no_grad():
         x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond, x0=x0)
 

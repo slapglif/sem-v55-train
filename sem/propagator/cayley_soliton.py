@@ -79,8 +79,6 @@ class CayleySolitonPropagator(nn.Module):
             dim, num_scales=num_scales, base_sparsity=laplacian_sparsity
         )
 
-    @torch.amp.autocast("cuda", enabled=False)
-    @torch.amp.autocast("cpu", enabled=False)
     def forward(self, psi: Tensor) -> Tensor:
         """Propagate wavefunction through one Cayley-Soliton step.
 
@@ -89,11 +87,15 @@ class CayleySolitonPropagator(nn.Module):
         Returns:
             psi_out: [B, S, D] complex64 propagated wavefunction
         """
-        # Force complex64 (float32 pairs) for CG solver numerical stability
-        # bf16 autocast is disabled via decorators; ensure we're in float32 complex
-        if psi.dtype == torch.complex32:
-            psi = psi.to(torch.complex64)
+        return self._forward_float32(psi)
 
+    def _forward_float32(self, psi: Tensor) -> Tensor:
+        device_type = "cuda" if psi.is_cuda else "cpu"
+        with torch.amp.autocast(device_type, enabled=False):
+            psi = psi.to(torch.complex64) if psi.dtype != torch.complex64 else psi
+            return self._forward_impl(psi)
+
+    def _forward_impl(self, psi: Tensor) -> Tensor:
         _t = self.timing_enabled
         t0 = t_cache = t_rhs = t_gate = t_cg = 0.0
         if _t:
