@@ -1,0 +1,125 @@
+import torch
+import pytorch_lightning as L
+import logging
+from typing import Any, Dict, Optional
+import math
+
+from ..model import SEMModel
+from ..utils.complex_adamw import ComplexAdamW
+from .scheduler import WSDScheduler
+from .distillation import EMATeacher, DistillationLoss
+
+logger = logging.getLogger(__name__)
+
+
+class SEMLightningModule(L.LightningModule):
+    def __init__(self, config: Any):
+        super().__init__()
+        self.save_hyperparameters()
+        self.config = config
+        self.model = SEMModel(config)
+
+        self.ema_teacher = None
+        self.distillation_loss = None
+        if config.distillation.enabled:
+            self.distillation_loss = DistillationLoss(
+                alpha=config.distillation.alpha,
+                temperature=config.distillation.temperature,
+            )
+
+    def forward(self, x, targets=None, token_freqs=None):
+        return self.model(x, targets=targets, token_freqs=token_freqs)
+
+    def training_step(self, batch, batch_idx):
+        token_ids, token_freqs = batch
+
+        if (
+            self.config.distillation.enabled
+            and self.global_step >= self.config.distillation.enable_at_step
+            and self.ema_teacher is None
+        ):
+            self._init_ema_teacher()
+
+        if self.ema_teacher is not None:
+            output = self.model(token_ids, targets=token_ids, token_freqs=token_freqs)
+            loss, dist_metrics = self.distillation_loss.compute(
+                output,
+                self.ema_teacher.teacher,
+                token_ids,
+                token_ids,
+                token_freqs=token_freqs,
+            )
+            self.log_dict({f"distill/{k}": v for k, v in dist_metrics.items()})
+        else:
+            output = self.model(token_ids, targets=token_ids, token_freqs=token_freqs)
+            loss = output["loss"]
+
+        self.log("train/loss", loss, prog_bar=True, sync_dist=True)
+        if "unitary_divergence" in output:
+            self.log("train/unitary_div", output["unitary_divergence"], prog_bar=True)
+
+        return loss
+
+    def on_after_backward(self):
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    self._handle_nan(f"NaN/Inf gradient in {name}")
+                    return
+
+    def _handle_nan(self, reason: str):
+        logger.error(f"STABILITY ALERT: {reason}")
+        self.zero_grad()
+        optimizers = self.optimizers()
+        if not isinstance(optimizers, list):
+            optimizers = [optimizers]
+        for opt in optimizers:
+            for pg in opt.param_groups:
+                pg["lr"] *= 0.5
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if self.ema_teacher is not None:
+            self.ema_teacher.update(self.model)
+        for name, param in self.named_parameters():
+            if torch.isnan(param.data).any() or torch.isinf(param.data).any():
+                logger.error(f"CRITICAL ERROR: NaN/Inf parameter {name}")
+
+    def configure_optimizers(self):
+        optimizer = ComplexAdamW(
+            self.parameters(),
+            lr=self.config.training.learning_rate,
+            weight_decay=self.config.training.weight_decay,
+            temperature=1e-5,
+        )
+        scheduler = WSDScheduler(
+            optimizer,
+            warmup_steps=self.config.training.warmup_steps,
+            decay_steps=self.config.training.decay_steps,
+            min_lr_ratio=self.config.training.lr_min_ratio,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
+        }
+
+    def _init_ema_teacher(self):
+        logger.info("Initializing EMA teacher for self-distillation")
+        self.ema_teacher = EMATeacher(
+            self.model,
+            decay_start=self.config.distillation.ema_decay_start,
+            decay_end=self.config.distillation.ema_decay_end,
+            decay_ramp_steps=self.config.distillation.ema_decay_ramp_steps,
+        ).to(self.device)
+
+    def on_save_checkpoint(self, checkpoint):
+        if self.ema_teacher is not None:
+            checkpoint["ema_teacher_state_dict"] = self.ema_teacher.teacher.state_dict()
+            checkpoint["ema_teacher_update_count"] = self.ema_teacher.update_count
+
+    def on_load_checkpoint(self, checkpoint):
+        if "ema_teacher_state_dict" in checkpoint:
+            self._init_ema_teacher()
+            self.ema_teacher.teacher.load_state_dict(
+                checkpoint["ema_teacher_state_dict"]
+            )
+            self.ema_teacher.update_count = checkpoint["ema_teacher_update_count"]
