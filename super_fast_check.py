@@ -2,7 +2,7 @@ from huggingface_hub import HfApi
 import sys
 
 api = HfApi()
-job_id = "69804ce057c5f7d79b72a66a"
+job_id = "6980527457c5f7d79b72a66c"
 
 print(f"Checking Job: {job_id}")
 try:

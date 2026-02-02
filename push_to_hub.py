@@ -12,13 +12,22 @@ api.upload_folder(
         "sem/**/*.py",
         "configs/*.yaml",
         "hf_train.py",
+        "hf_train_lightning.py",
         "launch_job.py",
         "pyproject.toml",
         "tokenizer/*",
+        "*.md",
     ],
     ignore_patterns=[
         "**/__pycache__/**",
         "*.egg-info/**",
+        "runs/**",
+        "checkpoints/**",
+        "*.pt",
+        "*.pth",
+        "tokenizer/*.json",
+        "*.log",
+        "*.txt",
     ],
 )
 print("Push complete!")

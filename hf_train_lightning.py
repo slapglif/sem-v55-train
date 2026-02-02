@@ -25,7 +25,6 @@ from sem.training.callbacks import (
     SEMConsoleLogger,
 )
 
-
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 logging.basicConfig(
@@ -55,9 +54,14 @@ def main():
 
     loggers = []
     if config.training.wandb_enabled:
-        loggers.append(
-            WandbLogger(project=config.training.wandb_project, config=config)
-        )
+        if os.environ.get("WANDB_API_KEY"):
+            loggers.append(
+                WandbLogger(project=config.training.wandb_project, config=config)
+            )
+        else:
+            logger.warning(
+                "wandb enabled but WANDB_API_KEY not found. Disabling wandb logger."
+            )
 
     callbacks = [
         ModelCheckpoint(

@@ -3,7 +3,7 @@ import os
 import sys
 
 api = HfApi()
-job_id = "69804ce057c5f7d79b72a66a"
+job_id = "6980537257c5f7d79b72a66f"
 
 print(f"Inspecting job: {job_id}")
 try:
