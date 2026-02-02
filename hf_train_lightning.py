@@ -12,7 +12,7 @@ from pytorch_lightning.callbacks import (
     Timer,
     RichModelSummary,
 )
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.profilers import SimpleProfiler
 
 from sem.config import SEMConfig
@@ -53,15 +53,16 @@ def main():
     datamodule = SEMDataModule(config, tokenizer)
 
     loggers = []
-    if config.training.wandb_enabled:
-        if os.environ.get("WANDB_API_KEY"):
-            loggers.append(
-                WandbLogger(project=config.training.wandb_project, config=config)
-            )
-        else:
+    if config.training.wandb_enabled and os.environ.get("WANDB_API_KEY"):
+        loggers.append(
+            WandbLogger(project=config.training.wandb_project, config=config)
+        )
+    else:
+        if config.training.wandb_enabled:
             logger.warning(
-                "wandb enabled but WANDB_API_KEY not found. Disabling wandb logger."
+                "wandb enabled but WANDB_API_KEY not found. Using TensorBoardLogger."
             )
+        loggers.append(TensorBoardLogger("logs"))
 
     callbacks = [
         ModelCheckpoint(
