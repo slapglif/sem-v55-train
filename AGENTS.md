@@ -77,6 +77,11 @@ Refactor the `sem` codebase to replace `torch.complex64` parameters and arithmet
   - Subtask 4: Verified gradients flow correctly ✓
   - Subtask 5: Model builds successfully (~573K params for test config) ✓
   - Subtask 6: Committed test file (commit 3a20325) ✓
+- **T13** (IN_PROGRESS):
+  - Subtask 1: Uploaded code to HF Hub repo (icarus112/sem-v55-lean-crystal) ✓
+  - Subtask 2: Launched HF Job on L40S (ID: 698013276f80a03a5692fc67) ✓
+  - Subtask 3: Created monitor_job.py for tracking ✓
+  - Subtask 4: Push git commits (5 ahead, network timeout - will retry) ⏳
 
 ### 4. Training Command
 
