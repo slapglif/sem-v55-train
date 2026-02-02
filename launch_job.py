@@ -43,6 +43,7 @@ banner "[STAGE 4/4] Starting training..."
 cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 python3 hf_train_lightning.py --no-compile """
     + extra_args
 )

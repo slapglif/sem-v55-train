@@ -44,7 +44,7 @@ sampler:
 training:
   # Throughput Aggression
   batch_size: 256          # Reduced from 4096 to log faster (accum=32)
-  micro_batch_size: 8      # Reduced to 8 to avoid CUDA OOM
+  micro_batch_size: 4      # Reduced to 4 to avoid CUDA OOM (sampler creates 3x [B,S,V] tensors)
   gradient_checkpointing: true
 
 
@@ -96,5 +96,5 @@ distillation:
   ema_decay_start: 0.99
   ema_decay_end: 0.9999
   ema_decay_ramp_steps: 10000
-  enable_at_stage: 0
+  enable_at_stage: 1       # Defer distillation until stage 1 to avoid OOM (teacher doubles memory)
   temperature: 1.5
