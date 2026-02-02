@@ -21,9 +21,10 @@ from sem.data.tokenizer import SEMTokenizer
 from sem.training.lightning_module import SEMLightningModule
 from sem.training.callbacks import (
     SEMCurriculumCallback,
-    SEMPerformanceMonitor,
     SEMHealthCallback,
+    SEMConsoleLogger,
 )
+
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -72,8 +73,8 @@ def main():
         DeviceStatsMonitor(),
         Timer(),
         SEMCurriculumCallback(config),
-        SEMPerformanceMonitor(),
         SEMHealthCallback(check_interval=config.training.health_check_interval),
+        SEMConsoleLogger(log_interval=config.training.log_interval),
     ]
 
     profiler = (
