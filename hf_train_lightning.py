@@ -8,7 +8,6 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
     RichProgressBar,
-    DeviceStatsMonitor,
     Timer,
     RichModelSummary,
 )
@@ -75,7 +74,6 @@ def main():
         LearningRateMonitor(logging_interval="step"),
         RichProgressBar(leave=True),
         RichModelSummary(max_depth=2),
-        DeviceStatsMonitor(),
         Timer(),
         SEMCurriculumCallback(config),
         SEMHealthCallback(check_interval=config.training.health_check_interval),

@@ -43,9 +43,11 @@ sampler:
 
 training:
   # Throughput Aggression
-  batch_size: 4096         # Global batch size
-  micro_batch_size: 128    # High micro-batch for VRAM saturation
+  batch_size: 256          # Reduced from 4096 to log faster (accum=32)
+  micro_batch_size: 8      # Reduced to 8 to avoid CUDA OOM
   gradient_checkpointing: true
+
+
   
   # Precision
   dtype: float32           # Real-Block Isomorphism (R2) mapping
@@ -80,9 +82,10 @@ training:
 curriculum:
   enabled: true
   stages:
-    - min_score: 3         # Start with higher quality data
+    - min_score: 0         # Start with all data to maximize throughput
       seq_len: 1024
       min_steps: 10000
+
     - min_score: 4
       seq_len: 2048
       min_steps: 40000

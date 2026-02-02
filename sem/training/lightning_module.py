@@ -19,6 +19,35 @@ class SEMLightningModule(L.LightningModule):
         self.config = config
         self.model = SEMModel(config)
 
+        # SEOP Fix 27: Explicitly enable gradient checkpointing if configured
+        if (
+            hasattr(config.training, "gradient_checkpointing")
+            and config.training.gradient_checkpointing
+        ):
+            logger.info(
+                "Enabling gradient checkpointing on Mamba and Propagator layers"
+            )
+            # We apply it to mamba_layers and propagator layers manually if needed,
+            # or just rely on the model's internal support if we add it.
+            # For now, let's use the old trainer's logic:
+            from torch.utils.checkpoint import checkpoint
+
+            # Monkey-patch forward methods for checkpointing
+            def make_checkpointed(module):
+                original_forward = module.forward
+
+                def checkpointed_forward(*args, **kwargs):
+                    return checkpoint(
+                        original_forward, *args, use_reentrant=False, **kwargs
+                    )
+
+                module.forward = checkpointed_forward
+
+            for m in self.model.mamba_layers:
+                make_checkpointed(m)
+            for m in self.model.propagator.layers:
+                make_checkpointed(m)
+
         self.ema_teacher = None
         self.distillation_loss = None
         if config.distillation.enabled:
@@ -33,12 +62,18 @@ class SEMLightningModule(L.LightningModule):
     def training_step(self, batch, batch_idx):
         token_ids, token_freqs = batch
 
-        if (
-            self.config.distillation.enabled
-            and self.global_step >= self.config.distillation.enable_at_step
-            and self.ema_teacher is None
-        ):
-            self._init_ema_teacher()
+        if self.config.distillation.enabled and self.ema_teacher is None:
+            # Check if we should enable at this stage
+            # For simplicity, we just check if current stage >= enable_at_stage
+            # We can get the stage from the curriculum callback if present
+            current_stage = 0
+            for cb in self.trainer.callbacks:
+                if hasattr(cb, "curriculum") and cb.curriculum is not None:
+                    current_stage = cb.curriculum.current_stage
+                    break
+
+            if current_stage >= self.config.distillation.enable_at_stage:
+                self._init_ema_teacher()
 
         if self.ema_teacher is not None:
             output = self.model(token_ids, targets=token_ids, token_freqs=token_freqs)
@@ -58,7 +93,8 @@ class SEMLightningModule(L.LightningModule):
         if "unitary_divergence" in output:
             self.log("train/unitary_div", output["unitary_divergence"], prog_bar=True)
 
-        return loss
+        # Return dict so callbacks can access outputs["loss"]
+        return {"loss": loss}
 
     def on_after_backward(self):
         for name, param in self.named_parameters():
