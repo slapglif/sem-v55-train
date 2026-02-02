@@ -45,7 +45,7 @@ training:
   # Throughput Aggression
   batch_size: 16
   micro_batch_size: 2
-  gradient_checkpointing: true
+  gradient_checkpointing: false
 
 
   
