@@ -30,7 +30,7 @@ def test_xpu():
     config.model.num_layers = 2
     config.model.vocab_size = 1000
     config.model.max_seq_length = 256  # Shorter
-    config.propagator.cg_max_iter = 3  # Our optimization
+    config.propagator.cg_max_iter = 8  # Balance speed vs convergence
     config.training.micro_batch_size = 2
     config.training.batch_size = 2
 

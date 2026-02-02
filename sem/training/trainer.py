@@ -393,6 +393,30 @@ class SEMTrainer:
             step=self.global_step,
         )
 
+    def _check_nan_grads(self) -> bool:
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    logger.error(f"NaN/Inf gradient detected in: {name}")
+                    return True
+        return False
+
+    def _check_nan_params(self) -> bool:
+        for name, param in self.model.named_parameters():
+            if torch.isnan(param.data).any() or torch.isinf(param.data).any():
+                logger.error(f"NaN/Inf parameter value detected in: {name}")
+                return True
+        return False
+
+    def _reduce_lr_on_nan(self, reason: str):
+        old_lr = self.optimizer.param_groups[0]["lr"]
+        for pg in self.optimizer.param_groups:
+            pg["lr"] *= 0.5
+        new_lr = self.optimizer.param_groups[0]["lr"]
+        logger.warning(
+            f"NaN detected ({reason}) - reducing LR by 50%: {old_lr:.2e} -> {new_lr:.2e}"
+        )
+
     def train(self):
         """Main training loop."""
         c = self.config.training
@@ -440,6 +464,7 @@ class SEMTrainer:
             step_metrics = {}
             timings = {}
             current_phase = "init"
+            nan_detected = False
 
             try:
                 t_step_start = _sync_and_time(self.device.type)
@@ -508,7 +533,24 @@ class SEMTrainer:
                         scaled_loss.backward()
                     t_backward_end = _sync_and_time(self.device.type)
 
-                    step_loss += loss.item() / accum_steps
+                    # NaN/Inf detection after backward
+                    loss_val = loss.item()
+                    if math.isnan(loss_val) or math.isinf(loss_val):
+                        logger.error(
+                            f"NaN/Inf loss={loss_val} at step {self.global_step} "
+                            f"micro={accum_idx}"
+                        )
+                        self._reduce_lr_on_nan("loss is NaN/Inf")
+                        self.optimizer.zero_grad()
+                        nan_detected = True
+                        break
+                    if self._check_nan_grads():
+                        self._reduce_lr_on_nan("gradient NaN/Inf")
+                        self.optimizer.zero_grad()
+                        nan_detected = True
+                        break
+
+                    step_loss += loss_val / accum_steps
                     if "unitary_divergence" in output:
                         step_unitary_divergence += (
                             output["unitary_divergence"].item() / accum_steps
@@ -540,6 +582,10 @@ class SEMTrainer:
                                 else:
                                     prop_agg[k] = prop_agg.get(k, 0) + v
 
+                if nan_detected:
+                    self.global_step += 1
+                    continue
+
                 current_phase = "grad_clip"
                 t_clip_start = _sync_and_time(self.device.type)
                 if self._grad_scaler is not None:
@@ -553,6 +599,12 @@ class SEMTrainer:
                 t_fisher_start = time.perf_counter()
                 self.quantizer.update_fisher(self.model)
                 t_fisher_end = _sync_and_time(self.device.type)
+
+                if self._check_nan_params():
+                    self._reduce_lr_on_nan("parameter NaN/Inf before optimizer step")
+                    self.optimizer.zero_grad()
+                    self.global_step += 1
+                    continue
 
                 current_phase = "optimizer_step"
                 t_optim_start = time.perf_counter()

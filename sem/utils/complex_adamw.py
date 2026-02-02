@@ -179,8 +179,8 @@ class ComplexAdamW(Optimizer):
             noise_i = torch.randn_like(p_imag) * noise_scale
 
             # Stay in natural gradient geometry
-            p_real.add_(noise_r / denom.sqrt())
-            p_imag.add_(noise_i / denom.sqrt())
+            p_real.add_(noise_r / (denom.sqrt() + 1e-8))
+            p_imag.add_(noise_i / (denom.sqrt() + 1e-8))
 
     def _thermodynamic_step(
         self,
@@ -234,4 +234,4 @@ class ComplexAdamW(Optimizer):
         if temperature > 0:
             noise_scale = math.sqrt(2 * temperature * lr)
             noise = torch.randn_like(param_view) * noise_scale
-            param_view.add_(noise / denom.sqrt())
+            param_view.add_(noise / (denom.sqrt() + 1e-8))
