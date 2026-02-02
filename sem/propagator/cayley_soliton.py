@@ -88,6 +88,11 @@ class CayleySolitonPropagator(nn.Module):
             psi_out: [B, S, D] complex64 propagated wavefunction
         """
         psi = psi.to(torch.complex64) if psi.dtype != torch.complex64 else psi
+        # SEOP Fix 27: Disable AMP autocast for entire Cayley step.
+        # CG solver, phase rotation (cos/sin), and Hamiltonian matvecs all need float32.
+        _device_type = psi.device.type
+        _autocast_ctx = torch.autocast(device_type=_device_type, enabled=False)
+        _autocast_ctx.__enter__()
         _t = self.timing_enabled
         t0 = t_cache = t_rhs = t_gate = t_cg = 0.0
         if _t:
@@ -210,6 +215,7 @@ class CayleySolitonPropagator(nn.Module):
         if _t:
             self._timing_stats.setdefault("total", []).append(time.perf_counter() - t0)
 
+        _autocast_ctx.__exit__(None, None, None)
         return psi_out
 
     @property

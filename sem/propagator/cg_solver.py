@@ -59,7 +59,29 @@ def _cg_solve(
     precond: Optional[Callable[[Tensor], Tensor]] = None,
     x0: Optional[Tensor] = None,
 ) -> Tensor:
-    """Conjugate Gradient solver for Hermitian positive definite systems."""
+    """Conjugate Gradient solver for Hermitian positive definite systems.
+
+    NOTE: This function disables AMP autocast to ensure float32 precision.
+    bf16 has only ~3 decimal digits — CG needs ~7 to converge to tol=1e-7.
+    Without this, the Cayley propagator's unitarity guarantee breaks.
+    """
+    # SEOP Fix 27: Force float32 precision for CG solver.
+    # bf16 autocast from the trainer poisons matmul ops inside matvec callbacks,
+    # preventing convergence (residual stuck at ~1.0 instead of <1e-4).
+    _device_type = b.device.type
+    with torch.autocast(device_type=_device_type, enabled=False):
+        return _cg_solve_impl(A, b, max_iter, tol, precond, x0)
+
+
+def _cg_solve_impl(
+    A: Any,
+    b: Tensor,
+    max_iter: int,
+    tol: float,
+    precond: Optional[Callable[[Tensor], Tensor]] = None,
+    x0: Optional[Tensor] = None,
+) -> Tensor:
+    """CG solver implementation (always runs in float32)."""
     b = b.float() if not torch.is_complex(b) else b.to(torch.complex64)
     if x0 is not None:
         x0 = x0.float() if not torch.is_complex(x0) else x0.to(torch.complex64)
@@ -172,18 +194,21 @@ def cg_solve_sparse(
     Returns:
         x: [..., D] complex64 solution
     """
-    b = b.float() if not torch.is_complex(b) else b.to(torch.complex64)
-    if x0 is not None:
-        x0 = x0.float() if not torch.is_complex(x0) else x0.to(torch.complex64)
+    # SEOP Fix 27: Float32 exclusion zone (same as _cg_solve)
+    _device_type = b.device.type
+    with torch.autocast(device_type=_device_type, enabled=False):
+        b = b.float() if not torch.is_complex(b) else b.to(torch.complex64)
+        if x0 is not None:
+            x0 = x0.float() if not torch.is_complex(x0) else x0.to(torch.complex64)
 
-    with torch.no_grad():
-        x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond, x0=x0)
+        with torch.no_grad():
+            x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond, x0=x0)
 
-    if torch.is_grad_enabled() and b.requires_grad:
-        Ax = matvec_fn(x_star)
-        residual = b - Ax
-        x = x_star + residual
-    else:
-        x = x_star
+        if torch.is_grad_enabled() and b.requires_grad:
+            Ax = matvec_fn(x_star)
+            residual = b - Ax
+            x = x_star + residual
+        else:
+            x = x_star
 
-    return x
+        return x
