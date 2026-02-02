@@ -37,6 +37,9 @@ logs/
 job_*.txt
 job_*.log
 verify_fix.out
+*.txt
+!README.md
+!requirements.txt
 
 # IDE
 .vscode/
