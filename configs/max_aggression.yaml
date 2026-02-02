@@ -62,7 +62,7 @@ training:
   # Data Pipeline (RAM Optimized)
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 6           # Reduced from 12 to avoid DataLoader warnings
+  num_workers: 2
   shuffle_buffer_size: 20000
   
   # Scheduler

@@ -58,19 +58,28 @@ class FineWebEduStream:
                 )
 
         t_load = time.perf_counter()
-        try:
-            ds = load_dataset(
-                self.dataset_name,
-                split=self.split,
-                streaming=True,
-                token=hf_token,
-            )
-        except Exception as e:
-            logger.error(f"[DATA] load_dataset failed: {e}")
+        last_err = None
+        for attempt in range(5):
+            try:
+                ds = load_dataset(
+                    self.dataset_name,
+                    split=self.split,
+                    streaming=True,
+                    token=hf_token,
+                )
+                break
+            except Exception as e:
+                last_err = e
+                logger.error(
+                    f"[DATA] load_dataset failed (attempt {attempt + 1}/5): {e}"
+                )
+                if attempt < 4:
+                    time.sleep(5 * (attempt + 1))
+        else:
             raise RuntimeError(
-                f"Failed to load {self.dataset_name}: {e}. "
+                f"Failed to load {self.dataset_name} after 5 attempts: {last_err}. "
                 f"Check network connectivity and HF_TOKEN."
-            ) from e
+            ) from last_err
         t_load_done = time.perf_counter()
         logger.info(f"[DATA] Dataset loaded in {t_load_done - t_load:.2f}s")
 
