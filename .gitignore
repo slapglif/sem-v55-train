@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyTorch
+*.pt
+*.pth
+*.ckpt
+runs/
+checkpoints/
+
+# Tokenizer (large file)
+tokenizer/tokenizer.json
+tokenizer/*.model
+
+# Logs
+*.log
+logs/
+job_*.txt
+job_*.log
+verify_fix.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.venv/
+venv/
+ENV/
+
+# Test outputs
+test_*.py
+!test_xpu_local.py
+profile_*.py
+
+# OMC/Agent
+.omc/
+nul
