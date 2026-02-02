@@ -108,7 +108,7 @@ class SEMHealthCallback(Callback):
         self.check_interval = check_interval
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        if trainer.global_step % self.check_interval != 0:
+        if trainer.global_step == 0 or trainer.global_step % self.check_interval != 0:
             return
         token_ids, _ = batch
         sample = token_ids[:1]

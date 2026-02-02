@@ -4,7 +4,7 @@
 
 model:
   hidden_dim: 256          # 256 real units (isomorphic to 128 complex pairs)
-  num_layers: 16           # Increased depth to saturate 8GB VRAM
+  num_layers: 8
   vocab_size: 32768
   max_seq_length: 2048
 
@@ -24,8 +24,8 @@ spinor:
 
 propagator:
   cayley_dt: 0.01
-  cg_max_iter: 50
-  cg_tol: 1.0e-6
+  cg_max_iter: 20
+  cg_tol: 1.0e-5
   nonlinear_alpha: 0.01
   laplacian_sparsity: 8
 
@@ -43,8 +43,8 @@ sampler:
 
 training:
   # Throughput Aggression
-  batch_size: 256          # Reduced from 4096 to log faster (accum=32)
-  micro_batch_size: 2      # Reduced for float32 precision (no bf16) to avoid OOM on L40S 48GB
+  batch_size: 16
+  micro_batch_size: 2
   gradient_checkpointing: true
 
 
