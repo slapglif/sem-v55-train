@@ -89,8 +89,10 @@ class CayleySolitonPropagator(nn.Module):
         Returns:
             psi_out: [B, S, D] complex64 propagated wavefunction
         """
-        # Force float32 for CG solver numerical stability
-        psi = psi.float()
+        # Force complex64 (float32 pairs) for CG solver numerical stability
+        # bf16 autocast is disabled via decorators; ensure we're in float32 complex
+        if psi.dtype == torch.complex32:
+            psi = psi.to(torch.complex64)
 
         _t = self.timing_enabled
         t0 = t_cache = t_rhs = t_gate = t_cg = 0.0
