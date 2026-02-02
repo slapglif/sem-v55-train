@@ -23,10 +23,10 @@ spinor:
   d_conv: 4
 
 propagator:
-  cayley_dt: 0.1
-  cg_max_iter: 8
-  cg_tol: 1.0e-7
-  nonlinear_alpha: 0.1
+  cayley_dt: 0.01
+  cg_max_iter: 50
+  cg_tol: 1.0e-6
+  nonlinear_alpha: 0.01
   laplacian_sparsity: 8
 
 quantizer:
@@ -44,7 +44,7 @@ sampler:
 training:
   # Throughput Aggression
   batch_size: 256          # Reduced from 4096 to log faster (accum=32)
-  micro_batch_size: 4      # Reduced to 4 to avoid CUDA OOM (sampler creates 3x [B,S,V] tensors)
+  micro_batch_size: 2      # Reduced for float32 precision (no bf16) to avoid OOM on L40S 48GB
   gradient_checkpointing: true
 
 

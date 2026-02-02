@@ -86,11 +86,7 @@ def main():
         else None
     )
 
-    precision = (
-        "bf16-mixed"
-        if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-        else "16-mixed"
-    )
+    precision = "32-true"
 
     trainer = L.Trainer(
         max_steps=config.training.max_steps,
