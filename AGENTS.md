@@ -27,6 +27,7 @@ Refactor the `sem` codebase to replace `torch.complex64` parameters and arithmet
 | 6 | T10b | Launch Max Aggression Training | executor | T10a | COMPLETED |
 | 7 | T11 | Revert Broken SEOP Optimizations | executor | T10b | COMPLETED |
 | 7 | T12 | Local XPU/CPU Validation Test | executor | T11 | COMPLETED |
+| 8 | T13 | Push Commits & Launch HF Job | executor | T12 | IN_PROGRESS |
 
 ### 3. Detailed Subtasks & Completion Summary
 
