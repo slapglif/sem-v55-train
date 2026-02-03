@@ -50,6 +50,7 @@ class CayleySolitonPropagator(nn.Module):
         check_unitarity_flag: bool = True,
         lazy_cg: bool = True,
         lazy_cg_tol: float = 1e-6,
+        direct_solve: bool = False,
         pit_gamma: float = 1.0,
     ):
         super().__init__()
@@ -62,6 +63,7 @@ class CayleySolitonPropagator(nn.Module):
         self._psi_cache = None
         self.lazy_cg = lazy_cg
         self.lazy_cg_tol = lazy_cg_tol
+        self.direct_solve = direct_solve
         self.pit_gamma = pit_gamma
         # CG skip statistics for monitoring
         self._cg_skip_count: int = 0
@@ -115,6 +117,13 @@ class CayleySolitonPropagator(nn.Module):
             envelope = torch.cosh(intensity)
             psi_rot_r = psi_rot_r / envelope
             psi_rot_i = psi_rot_i / envelope
+            norm_in = (psi_r * psi_r + psi_i * psi_i).sum(dim=-1, keepdim=True)
+            norm_rot = (psi_rot_r * psi_rot_r + psi_rot_i * psi_rot_i).sum(
+                dim=-1, keepdim=True
+            )
+            scale = torch.sqrt((norm_in + 1e-12) / (norm_rot + 1e-12))
+            psi_rot_r = psi_rot_r * scale
+            psi_rot_i = psi_rot_i * scale
 
             # Step 2: Cayley diffusion via sparse Hamiltonian matvec
             half_dt = self.dt / 2
@@ -146,6 +155,26 @@ class CayleySolitonPropagator(nn.Module):
                 self._timing_stats.setdefault("rhs_matvec", []).append(
                     time.perf_counter() - t_rhs
                 )
+
+            if self.direct_solve:
+                H = self.hamiltonian.get_hamiltonian_dense()
+                I = torch.eye(D, dtype=H.dtype, device=H.device)
+                A_plus = I + 1j * half_dt * H
+                rhs = torch.complex(rhs_r, rhs_i)
+                psi_out = torch.linalg.solve(A_plus, rhs)
+                self._psi_cache = psi_out.detach().clone()
+
+                self.hamiltonian.clear_cache()
+
+                if self.check_unitarity_flag and not self.training:
+                    check_unitarity(psi, psi_out)
+
+                if _t:
+                    self._timing_stats.setdefault("total", []).append(
+                        time.perf_counter() - t0
+                    )
+
+                return psi_out
 
             def a_minus_matvec_wrapped(v_real_block):
                 vr, vi = v_real_block.unbind(-1)
@@ -272,6 +301,7 @@ class CayleySolitonStack(nn.Module):
         laplacian_sparsity: int = 5,
         lazy_cg: bool = True,
         lazy_cg_tol: float = 1e-6,
+        direct_solve: bool = False,
         pit_gamma: float = 1.0,
     ):
         super().__init__()
@@ -286,6 +316,7 @@ class CayleySolitonStack(nn.Module):
                     laplacian_sparsity=laplacian_sparsity,
                     lazy_cg=lazy_cg,
                     lazy_cg_tol=lazy_cg_tol,
+                    direct_solve=direct_solve,
                     pit_gamma=pit_gamma,
                 )
                 for _ in range(num_layers)

@@ -107,6 +107,7 @@ class BornCollapseSampler(nn.Module):
         amp_real_t = (psi_real * w_real_t - psi_imag * w_imag_t).sum(dim=-1)
         amp_imag_t = (psi_real * w_imag_t + psi_imag * w_real_t).sum(dim=-1)
         target_amp_sq = amp_real_t**2 + amp_imag_t**2
+        target_amp_sq = torch.clamp(target_amp_sq, max=1e6)
 
         vocab_size = weight_real.shape[0]
         amp_sq_sum = torch.zeros_like(target_amp_sq)
@@ -120,8 +121,10 @@ class BornCollapseSampler(nn.Module):
             amp_imag = torch.matmul(psi_real, w_imag.t()) + torch.matmul(
                 psi_imag, w_real.t()
             )
-            amp_sq_sum += (amp_real**2 + amp_imag**2).sum(dim=-1)
+            amp_sq_chunk = (amp_real**2 + amp_imag**2).sum(dim=-1)
+            amp_sq_sum += torch.clamp(amp_sq_chunk, max=1e8)
 
+        amp_sq_sum = torch.clamp(amp_sq_sum, max=1e9)
         return target_amp_sq, amp_sq_sum
 
     def apply_temperature(

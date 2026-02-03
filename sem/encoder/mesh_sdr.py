@@ -125,9 +125,14 @@ class MESHEncoder(nn.Module):
         # components: sign(x)·max(|x|-τ, 0). τ adapts so ~k components survive per token.
         # This is the proximal operator of the L1 norm — optimal for sparse recovery.
         T_abs = T.abs()
-        topk_vals, _ = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
-        tau = topk_vals[..., -1:]  # [B, S, 1] — adaptive threshold at k-th value
+        topk_vals, topk_idx = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
+        tau = topk_vals[..., -1:]
         T_sparse = torch.sign(T) * torch.relu(T_abs - tau)
+        fallback = T_sparse.abs().sum(dim=-1, keepdim=True) <= 1e-12
+        if fallback.any():
+            mask = torch.zeros_like(T_abs).scatter(-1, topk_idx, 1.0)
+            T_sparse = torch.where(fallback, T * mask, T_sparse)
+        self._last_sdr_sparse = T_sparse.detach()
 
         # Step 5: Project sparse transport plan to hidden dim
         sdr = self.sdr_to_hidden(T_sparse)  # [B, S, D] float32

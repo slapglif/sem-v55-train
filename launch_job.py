@@ -8,6 +8,9 @@ parser.add_argument("--timeout", type=int, default=1800)
 parser.add_argument("--flavor", type=str, default="l40sx1")
 parser.add_argument("--config", type=str, default=None)
 parser.add_argument("--push-to-hub", type=str, default=None)
+parser.add_argument(
+    "--org", type=str, default=None, help="Organization namespace to run the job under"
+)
 args, extra = parser.parse_known_args()
 
 extra_args_list = extra.copy()
@@ -59,6 +62,7 @@ job = api.run_job(
     flavor=args.flavor,
     timeout=args.timeout,
     secrets={"HF_TOKEN": token},
+    namespace=args.org,
 )
 print(f"Job ID: {job.id}")
 print(f"URL: {job.url}")

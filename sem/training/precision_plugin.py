@@ -1,11 +1,16 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 from pytorch_lightning.plugins.precision import MixedPrecision
 
 
 class SEMPrecisionPlugin(MixedPrecision):
-    def __init__(self, precision: str, device: str, scaler: Optional[Any] = None):
+    def __init__(
+        self,
+        precision: Literal["16-mixed", "bf16-mixed"],
+        device: str,
+        scaler: Optional[Any] = None,
+    ):
         super().__init__(precision=precision, device=device, scaler=scaler)
         self._propagator_modules = []
         self._device_type = device
@@ -14,6 +19,8 @@ class SEMPrecisionPlugin(MixedPrecision):
         self._propagator_modules = []
         for name, submodule in module.named_modules():
             if submodule.__class__.__name__ == "CayleySolitonPropagator":
+                self._propagator_modules.append(submodule)
+            if submodule.__class__.__name__ == "MESHEncoder":
                 self._propagator_modules.append(submodule)
 
     def forward_context(self) -> Any:

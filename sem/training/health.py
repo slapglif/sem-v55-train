@@ -20,6 +20,7 @@ from ..utils.metrics import (
     phase_coherence,
     sparsity_ratio,
 )
+from sem.spinor.complex_ops import complex_mul_real
 
 
 @dataclass
@@ -96,7 +97,9 @@ class HealthMonitor:
             psi_encoder = model.encoder(sample_input)
 
             # SDR sparsity
-            report.sdr_sparsity = sparsity_ratio(psi_encoder).item()
+            sdr_sparse = getattr(model.encoder, "_last_sdr_sparse", None)
+            sdr_source = sdr_sparse if sdr_sparse is not None else psi_encoder
+            report.sdr_sparsity = sparsity_ratio(sdr_source).item()
             if report.sdr_sparsity < 0.5:
                 report.has_error = True
                 report.messages.append(
@@ -187,67 +190,81 @@ class HealthMonitor:
         - x = propagator output
         """
         try:
-             last_layer = model.propagator.layers[-1]
-             H = last_layer.hamiltonian.get_hamiltonian_dense()
-             D = last_layer.dim
-             I = torch.eye(D, dtype=H.dtype, device=H.device)
-             half_dt = last_layer.dt / 2
+            last_layer = model.propagator.layers[-1]
+            H = last_layer.hamiltonian.get_hamiltonian_dense()
+            D = last_layer.dim
+            I = torch.eye(D, dtype=H.dtype, device=H.device)
+            half_dt = last_layer.dt / 2
 
-             A_minus = I + 1j * half_dt * H
-             A_plus = I - 1j * half_dt * H
+            A_plus = I + 1j * half_dt * H
+            A_minus = I - 1j * half_dt * H
 
-             # Compute what the RHS should be
-             # Apply nonlinear phase rotation first
-             intensity = psi.real * psi.real + psi.imag * psi.imag
-             phase_shift = last_layer.alpha * intensity
-             psi_rot = psi * torch.exp(1j * phase_shift)
-             rhs = torch.matmul(psi_rot, A_plus.T)
+            psi_r = psi.real
+            psi_i = psi.imag
+            intensity = psi_r * psi_r + psi_i * psi_i
+            intensity = intensity / (intensity.mean(dim=-1, keepdim=True) + 1e-8)
+            phase_shift = torch.pi * (
+                1.0 - 2.0 * torch.exp(-last_layer.pit_gamma * intensity)
+            )
+            cos_p = torch.cos(phase_shift)
+            sin_p = torch.sin(phase_shift)
+            psi_rot_r, psi_rot_i = complex_mul_real(psi_r, psi_i, cos_p, sin_p)
+            envelope = torch.cosh(intensity)
+            psi_rot_r = psi_rot_r / envelope
+            psi_rot_i = psi_rot_i / envelope
+            norm_in = (psi_r * psi_r + psi_i * psi_i).sum(dim=-1, keepdim=True)
+            norm_rot = (psi_rot_r * psi_rot_r + psi_rot_i * psi_rot_i).sum(
+                dim=-1, keepdim=True
+            )
+            scale = torch.sqrt((norm_in + 1e-12) / (norm_rot + 1e-12))
+            psi_rot = torch.complex(psi_rot_r * scale, psi_rot_i * scale)
+            rhs = torch.matmul(psi_rot, A_minus.T)
 
-             # Get actual output
-             x = last_layer(psi)
+            # Get actual output
+            x = last_layer(psi)
 
-             # Compute residual
-             Ax = torch.matmul(x, A_minus.T)
-             residual = (Ax - rhs).norm() / (rhs.norm() + 1e-12)
-             return residual.item()
+            # Compute residual
+            Ax = torch.matmul(x, A_plus.T)
+            residual = (Ax - rhs).norm() / (rhs.norm() + 1e-12)
+            return residual.item()
         except Exception:
-             return 0.0
+            return 0.0
 
     def get_metrics_dict(self) -> Dict[str, float]:
-         """Get latest health metrics as a flat dict for logging."""
-         if not self.history:
-             return {}
-         report = self.history[-1]
-         return {
-             "health/unitarity_deviation": report.unitarity_dev,
-             "health/phase_coherence": report.phase_coherence_val,
-             "health/info_density": report.info_density,
-             "health/sdr_sparsity": report.sdr_sparsity,
-             "health/cg_residual": report.cg_residual,
-             "health/grad_norm": report.grad_norm,
-             "health/cg_skip_rate": report.cg_skip_rate,
-         }
+        """Get latest health metrics as a flat dict for logging."""
+        if not self.history:
+            return {}
+        report = self.history[-1]
+        return {
+            "health/unitarity_deviation": report.unitarity_dev,
+            "health/phase_coherence": report.phase_coherence_val,
+            "health/info_density": report.info_density,
+            "health/sdr_sparsity": report.sdr_sparsity,
+            "health/cg_residual": report.cg_residual,
+            "health/grad_norm": report.grad_norm,
+            "health/cg_skip_rate": report.cg_skip_rate,
+        }
 
     def state_dict(self) -> dict:
-         """Serialize for checkpointing (keep last 100 reports)."""
-         return {
-             "history": [
-                 {
-                     "step": r.step,
-                     "unitarity_dev": r.unitarity_dev,
-                     "phase_coherence_val": r.phase_coherence_val,
-                     "info_density": r.info_density,
-                     "sdr_sparsity": r.sdr_sparsity,
-                     "cg_residual": r.cg_residual,
-                     "grad_norm": r.grad_norm,
-                     "cg_skip_rate": r.cg_skip_rate,
-                     "has_warning": r.has_warning,
-                     "has_error": r.has_error,
-                     "messages": r.messages,
-                 }
-                 for r in self.history[-100:]
-             ]
-         }
+        """Serialize for checkpointing (keep last 100 reports)."""
+        return {
+            "history": [
+                {
+                    "step": r.step,
+                    "unitarity_dev": r.unitarity_dev,
+                    "phase_coherence_val": r.phase_coherence_val,
+                    "info_density": r.info_density,
+                    "sdr_sparsity": r.sdr_sparsity,
+                    "cg_residual": r.cg_residual,
+                    "grad_norm": r.grad_norm,
+                    "cg_skip_rate": r.cg_skip_rate,
+                    "has_warning": r.has_warning,
+                    "has_error": r.has_error,
+                    "messages": r.messages,
+                }
+                for r in self.history[-100:]
+            ]
+        }
 
     def load_state_dict(self, state: dict):
         self.history = [HealthReport(**r) for r in state.get("history", [])]

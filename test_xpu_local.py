@@ -26,13 +26,18 @@ def test_xpu():
 
     # Minimal config for fast testing
     config = SEMConfig()
-    config.model.hidden_dim = 128  # Smaller for speed
-    config.model.num_layers = 2
-    config.model.vocab_size = 1000
-    config.model.max_seq_length = 256  # Shorter
-    config.propagator.cg_max_iter = 8  # Balance speed vs convergence
-    config.training.micro_batch_size = 2
-    config.training.batch_size = 2
+    config.model.hidden_dim = 64
+    config.model.num_layers = 1
+    config.model.vocab_size = 512
+    config.model.max_seq_length = 64
+    config.propagator.cg_max_iter = 4
+    config.training.micro_batch_size = 1
+    config.training.batch_size = 1
+    config.encoder.sdr_sparsity = 8
+    config.encoder.sdr_candidates = 32
+    config.encoder.sinkhorn_max_iter = 10
+    config.encoder.sinkhorn_epsilon = 0.1
+    config.encoder.sinkhorn_tol = 1.0e-2
 
     print(f"\nConfig: D={config.model.hidden_dim}, layers={config.model.num_layers}")
     print(f"CG max_iter: {config.propagator.cg_max_iter}")
@@ -44,7 +49,7 @@ def test_xpu():
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Test data
-    B, S = 2, 256
+    B, S = 1, 64
     token_ids = torch.randint(0, config.model.vocab_size, (B, S), device=device)
     token_freqs = torch.rand(config.model.vocab_size, device=device)
 

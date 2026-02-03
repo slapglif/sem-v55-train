@@ -74,6 +74,7 @@ class SEMModel(nn.Module):
             laplacian_sparsity=c.propagator.laplacian_sparsity,
             lazy_cg=c.propagator.lazy_cg,
             lazy_cg_tol=c.propagator.lazy_cg_tol,
+            direct_solve=c.propagator.direct_solve,
             pit_gamma=c.propagator.pit_gamma,
         )
 

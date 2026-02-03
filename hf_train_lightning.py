@@ -24,7 +24,6 @@ from sem.training.callbacks import (
     SEMHealthCallback,
     SEMConsoleLogger,
 )
-from sem.training.precision_plugin import SEMPrecisionPlugin
 from sem.training.xpu_accelerator import XPUAccelerator
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -55,7 +54,12 @@ def main():
         "--precision",
         type=str,
         default="32-true",
-        choices=["32-true", "16-mixed", "bf16-mixed", "bf16-true"],
+        choices=["32-true"],
+    )
+    parser.add_argument(
+        "--overfit-batches",
+        type=float,
+        default=0.0,
     )
     args = parser.parse_args()
 
@@ -132,7 +136,7 @@ def main():
                 )
                 config.encoder.sinkhorn_tol = max(config.encoder.sinkhorn_tol, 1e-2)
                 config.encoder.sinkhorn_epsilon = max(
-                    config.encoder.sinkhorn_epsilon, 0.1
+                    config.encoder.sinkhorn_epsilon, 0.08
                 )
                 config.spinor.state_dim = min(config.spinor.state_dim, 64)
                 config.spinor.mimo_groups = min(config.spinor.mimo_groups, 8)
@@ -149,12 +153,11 @@ def main():
     # IPEX optimization for XPU (Intel Arc GPUs)
     if device_type == "xpu":
         try:
-            import intel_extension_for_pytorch as ipex
+            import importlib
 
+            ipex = importlib.import_module("intel_extension_for_pytorch")
             logger.info("Applying IPEX optimizations for XPU training...")
             dtype = torch.float32
-            if args.precision in ["16-mixed", "bf16-mixed", "bf16-true"]:
-                dtype = torch.bfloat16
             model = ipex.optimize(model, dtype=dtype)
             logger.info(f"IPEX optimization applied (dtype={dtype})")
         except ImportError:
@@ -164,18 +167,8 @@ def main():
                 "Install with: pip install intel-extension-for-pytorch"
             )
 
-    # Use custom precision plugin to prevent autocast poisoning in Cayley propagator
     plugins = []
-    if args.precision in ["bf16-mixed", "16-mixed"]:
-        precision_plugin = SEMPrecisionPlugin(
-            precision=args.precision, device=device_type
-        )
-        precision_plugin.setup_module(model)
-        plugins.append(precision_plugin)
-        logger.info(
-            "Using SEMPrecisionPlugin to exclude CayleySolitonPropagator from "
-            f"{args.precision} autocast (device={device_type})"
-        )
+    logger.info("SEOP Fix 31: Running in full fp32 mode (bf16 disabled for stability)")
 
     loggers = []
     if config.training.wandb_enabled and os.environ.get("WANDB_API_KEY"):
@@ -219,6 +212,7 @@ def main():
         strategy=strategy if strategy is not None else "auto",
         precision=args.precision if not plugins else None,
         plugins=plugins if plugins else None,
+        overfit_batches=args.overfit_batches,
         accumulate_grad_batches=config.training.batch_size
         // config.training.micro_batch_size,
         gradient_clip_val=config.training.gradient_clip,

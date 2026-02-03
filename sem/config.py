@@ -42,6 +42,7 @@ class PropagatorConfig:
     laplacian_sparsity: int = 5
     lazy_cg: bool = True
     lazy_cg_tol: float = 1e-6  # Residual gate tolerance for lazy CG
+    direct_solve: bool = False
     pit_gamma: float = 1.0  # Soliton envelope width (SEOP Fix 29)
 
 

@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, cast
 import torch
 import pytorch_lightning as L
 from pytorch_lightning.callbacks import Callback
@@ -27,20 +27,41 @@ class SEMConsoleLogger(Callback):
         step = trainer.global_step
         if step % self.log_interval != 0 or step == 0:
             return
+        start_time = self.start_time
+        if start_time is None:
+            return
 
-        loss = outputs["loss"].item()
+        if not isinstance(outputs, dict) or "loss" not in outputs:
+            return
+        outputs_dict = cast(Dict[str, Any], outputs)
+
+        if hasattr(self, "_last_logged_step") and self._last_logged_step == step:
+            return
+        self._last_logged_step = step
+
+        loss_val = outputs_dict["loss"]
+        loss = (
+            loss_val.item() if isinstance(loss_val, torch.Tensor) else float(loss_val)
+        )
         # Handle multiple optimizers if present, otherwise take first
-        opts = trainer.optimizers
+        trainer_obj = cast(Any, trainer)
+        opts = trainer_obj.optimizers
         lr = opts[0].param_groups[0]["lr"] if opts else 0.0
 
-        elapsed = time.perf_counter() - self.start_time
+        elapsed = time.perf_counter() - start_time
         avg_step_time = elapsed / max(1, step)
 
         # Calculate tokens/sec
-        batch_size = pl_module.config.training.batch_size
+        module = cast(Any, pl_module)
+        config = getattr(module, "config", None)
+        if config is None:
+            return
+        batch_size = config.training.batch_size
         seq_len = 1024
-        if hasattr(trainer, "datamodule") and hasattr(trainer.datamodule, "dataset"):
-            seq_len = trainer.datamodule.dataset.seq_len
+        datamodule = getattr(trainer_obj, "datamodule", None)
+        dataset = getattr(datamodule, "dataset", None)
+        if dataset is not None and hasattr(dataset, "seq_len"):
+            seq_len = dataset.seq_len
         tok_per_sec = (batch_size * seq_len) / max(1e-6, avg_step_time)
 
         logger.info(
@@ -68,35 +89,40 @@ class SEMCurriculumCallback(Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if not self.curriculum:
             return
-        loss = outputs["loss"].item()
+        if not isinstance(outputs, dict) or "loss" not in outputs:
+            return
+        curriculum = cast(CurriculumManager, self.curriculum)
+        outputs_dict = cast(Dict[str, Any], outputs)
+        loss_val = outputs_dict["loss"]
+        loss = (
+            loss_val.item() if isinstance(loss_val, torch.Tensor) else float(loss_val)
+        )
         unitary_div = trainer.callback_metrics.get(
             "train/unitary_div", torch.tensor(0.0)
         ).item()
-        self.curriculum.record_metrics(loss, unitary_div)
-        if self.curriculum.should_check_transition(trainer.global_step):
-            if self.curriculum.check_transition(trainer.global_step, True):
-                self._handle_transition(trainer, pl_module)
+        curriculum.record_metrics(loss, unitary_div)
+        if curriculum.should_check_transition(trainer.global_step):
+            if curriculum.check_transition(trainer.global_step, True):
+                self._handle_transition(trainer, pl_module, curriculum)
 
-    def _handle_transition(self, trainer, pl_module):
-        old_stage = self.curriculum.current_stage
-        self.curriculum.advance_stage(trainer.global_step)
+    def _handle_transition(self, trainer, pl_module, curriculum: CurriculumManager):
+        old_stage = curriculum.current_stage
+        curriculum.advance_stage(trainer.global_step)
         logger.info(
-            f"Curriculum Transition: Stage {old_stage} -> {self.curriculum.current_stage}"
+            f"Curriculum Transition: Stage {old_stage} -> {curriculum.current_stage}"
         )
         if hasattr(trainer, "datamodule") and hasattr(
             trainer.datamodule, "update_seq_len"
         ):
-            trainer.datamodule.update_seq_len(
-                self.curriculum.seq_len, self.curriculum.min_score
-            )
+            trainer.datamodule.update_seq_len(curriculum.seq_len, curriculum.min_score)
         for opt in trainer.optimizers:
             for pg in opt.param_groups:
-                pg["lr"] *= self.curriculum.lr_decay_per_stage
+                pg["lr"] *= curriculum.lr_decay_per_stage
         pl_module.log_dict(
             {
-                "curriculum/stage": float(self.curriculum.current_stage),
-                "curriculum/seq_len": float(self.curriculum.seq_len),
-                "curriculum/min_score": float(self.curriculum.min_score),
+                "curriculum/stage": float(curriculum.current_stage),
+                "curriculum/seq_len": float(curriculum.seq_len),
+                "curriculum/min_score": float(curriculum.min_score),
             }
         )
 
@@ -110,6 +136,12 @@ class SEMHealthCallback(Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if trainer.global_step == 0 or trainer.global_step % self.check_interval != 0:
             return
+        if (
+            hasattr(self, "_last_health_step")
+            and self._last_health_step == trainer.global_step
+        ):
+            return
+        self._last_health_step = trainer.global_step
         token_ids, _ = batch
         sample = token_ids[:1]
         grad_norm = trainer.callback_metrics.get(
@@ -139,7 +171,7 @@ class WandbCallback:
         project: str,
         config: Any = None,
         enabled: bool = True,
-        resume_id: str = None,
+        resume_id: Optional[str] = None,
     ):
         self.project = project
         self.config = config
@@ -148,11 +180,13 @@ class WandbCallback:
         self._run = None
         if enabled:
             try:
-                import wandb
+                import importlib
 
-                if resume_id:
+                wandb = importlib.import_module("wandb")
+                resume = resume_id
+                if resume is not None:
                     self._run = wandb.init(
-                        project=project, config=config, resume="must", id=resume_id
+                        project=project, config=config, resume="must", id=resume
                     )
                 else:
                     self._run = wandb.init(project=project, config=config)
@@ -164,8 +198,9 @@ class WandbCallback:
     def log(self, metrics: Dict[str, float], step: int):
         if self.enabled and self._run:
             try:
-                import wandb
+                import importlib
 
+                wandb = importlib.import_module("wandb")
                 wandb.log(metrics, step=step)
             except Exception as e:
                 logger.warning(f"wandb log failed: {e}")
@@ -173,8 +208,9 @@ class WandbCallback:
     def alert(self, title: str, text: str):
         if self.enabled and self._run:
             try:
-                import wandb
+                import importlib
 
+                wandb = importlib.import_module("wandb")
                 wandb.alert(title=title, text=text)
             except Exception:
                 pass
@@ -182,8 +218,9 @@ class WandbCallback:
     def finish(self):
         if self.enabled and self._run:
             try:
-                import wandb
+                import importlib
 
+                wandb = importlib.import_module("wandb")
                 wandb.finish()
             except Exception:
                 pass
