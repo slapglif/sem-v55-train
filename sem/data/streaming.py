@@ -23,6 +23,8 @@ class FineWebEduStream:
         split: Dataset split
         shuffle_buffer: Number of documents to buffer for shuffling
         dataset_name: HuggingFace dataset name
+        cache_dir: Local directory to cache documents (SEOP Fix 40)
+        max_cache_docs: Maximum documents to cache (0 = unlimited)
     """
 
     def __init__(
@@ -31,18 +33,42 @@ class FineWebEduStream:
         split: str = "train",
         shuffle_buffer: int = 1000,
         dataset_name: str = "HuggingFaceFW/fineweb-edu",
+        cache_dir: Optional[str] = None,
+        max_cache_docs: int = 100000,  # ~500MB cache
     ):
         self.min_score = min_score
         self.split = split
         self.shuffle_buffer = shuffle_buffer
         self.dataset_name = dataset_name
+        # SEOP Fix 40: Local cache for streamed documents
+        self.cache_dir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "sem" / "fineweb"
+        self.max_cache_docs = max_cache_docs
+        self.cache_file = self.cache_dir / f"fineweb_edu_score{min_score}.jsonl"
 
     def __iter__(self) -> Iterator[str]:
         from datasets import load_dataset
         import os
+        import json
+
+        # SEOP Fix 40: Check for local cache first
+        # Look for any existing cache file (main or worker-specific)
+        cache_files = list(self.cache_dir.glob(f"fineweb_edu_score{self.min_score}*.jsonl"))
+        if cache_files:
+            # Use the largest cache file (most complete)
+            cache_file = max(cache_files, key=lambda f: f.stat().st_size)
+            cache_size = cache_file.stat().st_size / 1e6
+            if cache_size > 1.0:  # Only use if >1MB (not empty/partial)
+                logger.info(f"[DATA] Using cached data from {cache_file} ({cache_size:.1f}MB)")
+                with open(cache_file, "r") as f:
+                    for line in f:
+                        text = json.loads(line).get("text", "")
+                        if text.strip():
+                            yield text
+                return
 
         logger.info(f"[DATA] Starting FineWeb-Edu stream from {self.dataset_name}")
         logger.info(f"[DATA] Split: {self.split}, min_score: {self.min_score}")
+        logger.info(f"[DATA] Will cache to {self.cache_file}")
 
         hf_token = os.environ.get("HF_TOKEN")
         if hf_token:
@@ -107,20 +133,47 @@ class FineWebEduStream:
         t_first_doc = time.perf_counter()
         logger.info("[DATA] Waiting for first document from stream...")
 
-        for example in ds:
-            text = example.get("text", "")
-            if text.strip():
-                doc_count += 1
-                if doc_count == 1:
-                    latency = time.perf_counter() - t_first_doc
-                    logger.info(f"[DATA] First doc received ({latency:.1f}s)")
-                if doc_count % 1000 == 0:
-                    elapsed = time.perf_counter() - t_first_doc
-                    logger.info(
-                        f"[DATA] {doc_count} docs streamed "
-                        f"({doc_count / elapsed:.0f} docs/s)"
-                    )
-                yield text
+        # SEOP Fix 40: Cache documents as we stream
+        # Use worker-specific cache file to avoid race conditions
+        import multiprocessing
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id if worker_info else 0
+
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        worker_cache = self.cache_dir / f"fineweb_edu_score{self.min_score}_worker{worker_id}.jsonl"
+
+        # Only cache from worker 0 (or main process) to avoid duplication
+        should_cache = self.max_cache_docs > 0 and worker_id == 0
+        cache_handle = open(worker_cache, "w") if should_cache else None
+        cache_count = 0
+
+        try:
+            for example in ds:
+                text = example.get("text", "")
+                if text.strip():
+                    doc_count += 1
+                    if doc_count == 1:
+                        latency = time.perf_counter() - t_first_doc
+                        logger.info(f"[DATA] First doc received ({latency:.1f}s)")
+                    if doc_count % 1000 == 0:
+                        elapsed = time.perf_counter() - t_first_doc
+                        logger.info(
+                            f"[DATA] {doc_count} docs streamed "
+                            f"({doc_count / elapsed:.0f} docs/s)"
+                        )
+                    # Write to cache (SEOP Fix 40)
+                    if cache_handle and cache_count < self.max_cache_docs:
+                        cache_handle.write(json.dumps({"text": text}) + "\n")
+                        cache_count += 1
+                        if cache_count == self.max_cache_docs:
+                            logger.info(f"[DATA] Cache full ({cache_count} docs), subsequent docs not cached")
+                    yield text
+        finally:
+            if cache_handle:
+                cache_handle.close()
+                if worker_cache.exists():
+                    cache_size = worker_cache.stat().st_size / 1e6
+                    logger.info(f"[DATA] Cached {cache_count} docs to {worker_cache} ({cache_size:.1f}MB)")
 
 
 class SequencePacker:

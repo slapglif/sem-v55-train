@@ -62,7 +62,9 @@ class BornCollapseSampler(nn.Module):
         # Output bias (real-valued)
         self.output_bias = nn.Parameter(torch.zeros(vocab_size))
 
-    def compute_log_born_probs(self, psi: Tensor) -> Tuple[Tensor, Tensor]:
+    def compute_log_born_probs(
+        self, psi: Tensor
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         """Project complex wavefunction and compute log|amplitude|^2.
 
         Numerically stable implementation:
@@ -73,6 +75,8 @@ class BornCollapseSampler(nn.Module):
             psi: [B, S, D] complex64 wavefunction
         Returns:
             log_probs_unnorm: [B, S, V] float32 unnormalized log-probabilities
+            amp_sq: [B, S, V] normalized Born probabilities (sums to 1.0 across V)
+            amp_sq_sum_normalized: [B, S] sum of |ψ|² divided by hidden_dim (should be ~1.0 for unit norm)
         """
         # Complex projection: amp = (W_r + iW_i) @ (ψ_re + iψ_im)
         amp_real = self.proj_real(psi.real) - self.proj_imag(psi.imag)
@@ -86,12 +90,28 @@ class BornCollapseSampler(nn.Module):
         # Fixed 1e-12 creates a hard gradient wall at log(1e-12) ≈ -27.6 for rare tokens.
         # Adaptive floor = mean(amp²) * 1e-6 keeps floor 60dB below signal mean,
         # maintaining gradient flow for rare tokens proportional to actual amplitude scale.
-        amp_sq = amp_real**2 + amp_imag**2
+        amp_sq_raw = amp_real**2 + amp_imag**2
+
+        # SEOP Fix 17: Born rule normalization
+        # Raw |ψ|² doesn't sum to 1.0 (typically sums to ~D due to projection from D-dim hidden).
+        # Proper Born rule requires P(token) = |ψ_token|² / Σ|ψ_i|² to be a valid probability.
+        # Normalize across vocab dimension to get valid probabilities for loss computation.
+        amp_sq_sum_raw = amp_sq_raw.sum(dim=-1, keepdim=True)
+        amp_sq = amp_sq_raw / (amp_sq_sum_raw + 1e-12)  # Now sums to 1.0 across vocab
+
+        # SEOP Fix 32: Proper unitary divergence normalization
+        # The unitary divergence should measure deviation from unit norm in LOG space.
+        # Original: (log(sum))^2 explodes when sum >> 1 (e.g., 21000 -> loss=100)
+        # Fixed: log((sum/D)^2) = 2*log(sum/D) measures deviation from expected magnitude
+        # Expected sum ≈ hidden_dim due to projection from D-dimensional space
+        # This keeps unitary divergence stable and interpretable
+        amp_sq_sum_normalized = amp_sq_sum_raw / self.hidden_dim  # Should be ~1.0 if unit norm
+
         floor = amp_sq.mean(dim=-1, keepdim=True) * 1e-6 + 1e-30  # 60dB below mean
         log_amp_sq = torch.log(amp_sq + floor)
         log_probs_unnorm = log_amp_sq + self.output_bias
 
-        return log_probs_unnorm, amp_sq
+        return log_probs_unnorm, amp_sq, amp_sq_sum_normalized.squeeze(-1)
 
     def compute_target_amp_sq_and_sum(
         self, psi: Tensor, target_ids: Tensor, chunk_size: int = 2048
@@ -125,7 +145,10 @@ class BornCollapseSampler(nn.Module):
             amp_sq_sum += torch.clamp(amp_sq_chunk, max=1e8)
 
         amp_sq_sum = torch.clamp(amp_sq_sum, max=1e9)
-        return target_amp_sq, amp_sq_sum
+
+        # SEOP Fix 32: Normalize by hidden_dim to match expected magnitude
+        amp_sq_sum_normalized = amp_sq_sum / self.hidden_dim
+        return target_amp_sq, amp_sq_sum_normalized
 
     def apply_temperature(
         self, logits: Tensor, temperature: Optional[float] = None
@@ -204,12 +227,15 @@ class BornCollapseSampler(nn.Module):
             dict with:
                 'logits': [B, S, V] raw logits (for training loss)
                 'log_probs': [B, S, V] log softmax (for cross-entropy)
-                'amp_sq': [B, S, V] squared amplitudes (for UnitaryBornLoss)
+                'amp_sq': [B, S, V] normalized Born probabilities (sum to 1.0)
+                'amp_sq_sum_raw': [B, S] sum divided by hidden_dim (SEOP Fix 32: normalized for unitary loss)
                 'tokens': [B, S] sampled token indices (if sample=True)
                 'probs': [B, S, V] probabilities (if sample=True)
         """
         # Step 1: Born rule projection -> log|amplitude|^2
-        log_probs_unnorm, amp_sq = self.compute_log_born_probs(psi)  # [B, S, V]
+        log_probs_unnorm, amp_sq, amp_sq_sum_raw = self.compute_log_born_probs(
+            psi
+        )  # [B, S, V], [B, S, V], [B, S]
 
         # Step 2: Temperature scaling
         logits = self.apply_temperature(log_probs_unnorm, temperature)  # [B, S, V]
@@ -218,6 +244,7 @@ class BornCollapseSampler(nn.Module):
             "logits": logits,
             "log_probs": F.log_softmax(logits, dim=-1),
             "amp_sq": amp_sq,
+            "amp_sq_sum_raw": amp_sq_sum_raw,
         }
 
         if sample:
@@ -244,6 +271,6 @@ class BornCollapseSampler(nn.Module):
         Returns:
             log_probs: [B, S, V] float32
         """
-        log_probs_unnorm, _ = self.compute_log_born_probs(psi)
+        log_probs_unnorm, _, _ = self.compute_log_born_probs(psi)
         logits = self.apply_temperature(log_probs_unnorm)
         return F.log_softmax(logits, dim=-1)

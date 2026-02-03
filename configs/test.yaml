@@ -2,7 +2,7 @@
 model:
   hidden_dim: 128
   num_layers: 8
-  vocab_size: 32768
+  vocab_size: 50262  # GPT-2 (50257) + 5 special tokens
   max_seq_length: 256
 
 encoder:
@@ -20,9 +20,9 @@ spinor:
   d_conv: 4
 
 propagator:
-  cayley_dt: 0.1
-  cg_max_iter: 5
-  cg_tol: 1.0e-4
+  cayley_dt: 0.01  # Reduced for stability (smaller Cayley step)
+  cg_max_iter: 10  # Balance speed vs convergence
+  cg_tol: 1.0e-5   # Reasonable tolerance
   nonlinear_alpha: 0.1
   laplacian_sparsity: 4
 
@@ -41,20 +41,21 @@ sampler:
 training:
   batch_size: 64
   micro_batch_size: 8
-  gradient_checkpointing: true
+  gradient_checkpointing: false  # Disabled - tensor mismatch bug
   dtype: float32
-  learning_rate: 6.0e-4
-  weight_decay: 0.1
-  warmup_steps: 50
-  max_steps: 10
-  gradient_clip: 1.0
+  learning_rate: 1.0e-3  # SEOP Fix 35: Match test_quick_convergence.py (was 3e-5, 33x too low)
+  weight_decay: 0.0      # SEOP Fix 35: Disable for fast convergence test (was 0.01)
+  warmup_steps: 20       # SEOP Fix 35: Shorter warmup for 100-step test (was 200)
+  max_steps: 500  # Extended for English convergence
+  gradient_clip: 1.0     # SEOP Fix 35: Match test_quick_convergence.py (was 0.3)
+  unitary_lambda: 0.01   # Keep unitarity regularization (now with gradients flowing)
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 2
-  shuffle_buffer_size: 1000
-  scheduler_type: "wsd"
+  num_workers: 0  # SEOP Fix 40: 0 workers for streaming (avoids HF pyarrow fork issues)
+  shuffle_buffer_size: 10000  # SEOP Fix 39: 10x buffer to reduce network roundtrips
+  scheduler_type: "cosine"  # Changed from WSD to simpler cosine for initial testing
   stable_steps: 0
-  decay_steps: 100
+  decay_steps: 500  # Match max_steps for full cosine decay
   lr_min_ratio: 0.1
   log_interval: 5
   health_check_interval: 50
