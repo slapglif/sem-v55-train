@@ -82,6 +82,11 @@ def _cg_solve_impl(
     x0: Optional[Tensor] = None,
 ) -> Tensor:
     """CG solver implementation (always runs in float32)."""
+    assert not torch.is_autocast_enabled()
+    if torch.is_complex(b):
+        assert b.dtype == torch.complex64
+    else:
+        assert b.dtype == torch.float32
     b = b.float() if not torch.is_complex(b) else b.to(torch.complex64)
     if x0 is not None:
         x0 = x0.float() if not torch.is_complex(x0) else x0.to(torch.complex64)
@@ -96,7 +101,9 @@ def _cg_solve_impl(
                 res_c = A(v_c)
                 return torch.view_as_real(cast(Tensor, res_c))
         else:
-            matvec = A
+
+            def matvec(v: Tensor) -> Tensor:
+                return cast(Tensor, A(v))
 
     else:
         if torch.is_complex(A):

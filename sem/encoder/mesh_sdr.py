@@ -41,11 +41,13 @@ class MESHEncoder(nn.Module):
         sinkhorn_max_iter: int = 50,
         sinkhorn_tol: float = 1e-3,
         max_seq_length: int = 2048,
+        low_vram_mode: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.sdr_sparsity = sdr_sparsity
         self.sdr_candidates = sdr_candidates
+        self.low_vram_mode = low_vram_mode
 
         # Token embedding (real-valued)
         self.embedding = nn.Embedding(vocab_size, hidden_dim)
@@ -111,7 +113,11 @@ class MESHEncoder(nn.Module):
 
         # Step 3: Sinkhorn optimal transport
 
-        T = self.sinkhorn(C)  # [B, S, sdr_candidates]
+        if self.low_vram_mode and C.device.type == "xpu":
+            C_cpu = C.float().cpu()
+            T = self.sinkhorn(C_cpu).to(C.device)
+        else:
+            T = self.sinkhorn(C)  # [B, S, sdr_candidates]
 
         # Step 4: SEOP Fix 15 — Soft-threshold sparsification
         # Hard top-k zeros 87.5% of dimensions, destroying Gaussian tail information.

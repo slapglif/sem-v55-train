@@ -93,6 +93,37 @@ class BornCollapseSampler(nn.Module):
 
         return log_probs_unnorm, amp_sq
 
+    def compute_target_amp_sq_and_sum(
+        self, psi: Tensor, target_ids: Tensor, chunk_size: int = 2048
+    ) -> Tuple[Tensor, Tensor]:
+        psi_real = psi.real
+        psi_imag = psi.imag
+        weight_real = self.proj_real.weight
+        weight_imag = self.proj_imag.weight
+
+        w_real_t = F.embedding(target_ids, weight_real)
+        w_imag_t = F.embedding(target_ids, weight_imag)
+
+        amp_real_t = (psi_real * w_real_t - psi_imag * w_imag_t).sum(dim=-1)
+        amp_imag_t = (psi_real * w_imag_t + psi_imag * w_real_t).sum(dim=-1)
+        target_amp_sq = amp_real_t**2 + amp_imag_t**2
+
+        vocab_size = weight_real.shape[0]
+        amp_sq_sum = torch.zeros_like(target_amp_sq)
+        for start in range(0, vocab_size, chunk_size):
+            end = min(start + chunk_size, vocab_size)
+            w_real = weight_real[start:end]
+            w_imag = weight_imag[start:end]
+            amp_real = torch.matmul(psi_real, w_real.t()) - torch.matmul(
+                psi_imag, w_imag.t()
+            )
+            amp_imag = torch.matmul(psi_real, w_imag.t()) + torch.matmul(
+                psi_imag, w_real.t()
+            )
+            amp_sq_sum += (amp_real**2 + amp_imag**2).sum(dim=-1)
+
+        return target_amp_sq, amp_sq_sum
+
     def apply_temperature(
         self, logits: Tensor, temperature: Optional[float] = None
     ) -> Tensor:

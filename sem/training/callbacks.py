@@ -21,7 +21,7 @@ class SEMConsoleLogger(Callback):
 
     def on_train_start(self, trainer, pl_module):
         self.start_time = time.perf_counter()
-        logger.info("🚀 TRAINING START")
+        logger.info("TRAINING START")
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         step = trainer.global_step
@@ -81,7 +81,7 @@ class SEMCurriculumCallback(Callback):
         old_stage = self.curriculum.current_stage
         self.curriculum.advance_stage(trainer.global_step)
         logger.info(
-            f"✨ Curriculum Transition: Stage {old_stage} -> {self.curriculum.current_stage}"
+            f"Curriculum Transition: Stage {old_stage} -> {self.curriculum.current_stage}"
         )
         if hasattr(trainer, "datamodule") and hasattr(
             trainer.datamodule, "update_seq_len"
@@ -121,8 +121,114 @@ class SEMHealthCallback(Callback):
         pl_module.log_dict(self.monitor.get_metrics_dict())
         if report.has_error:
             logger.error(
-                f"🚨 Health Error at step {trainer.global_step}: {'; '.join(report.messages)}"
+                f"Health Error at step {trainer.global_step}: {'; '.join(report.messages)}"
             )
             for opt in trainer.optimizers:
                 for pg in opt.param_groups:
                     pg["lr"] *= 0.5
+
+
+# Legacy non-Lightning callbacks for hf_train.py
+
+
+class WandbCallback:
+    """Legacy wandb callback for non-Lightning trainer."""
+
+    def __init__(
+        self,
+        project: str,
+        config: Any = None,
+        enabled: bool = True,
+        resume_id: str = None,
+    ):
+        self.project = project
+        self.config = config
+        self.enabled = enabled
+        self.run_id = None
+        self._run = None
+        if enabled:
+            try:
+                import wandb
+
+                if resume_id:
+                    self._run = wandb.init(
+                        project=project, config=config, resume="must", id=resume_id
+                    )
+                else:
+                    self._run = wandb.init(project=project, config=config)
+                self.run_id = self._run.id if self._run else None
+            except Exception as e:
+                logger.warning(f"wandb init failed: {e}")
+                self.enabled = False
+
+    def log(self, metrics: Dict[str, float], step: int):
+        if self.enabled and self._run:
+            try:
+                import wandb
+
+                wandb.log(metrics, step=step)
+            except Exception as e:
+                logger.warning(f"wandb log failed: {e}")
+
+    def alert(self, title: str, text: str):
+        if self.enabled and self._run:
+            try:
+                import wandb
+
+                wandb.alert(title=title, text=text)
+            except Exception:
+                pass
+
+    def finish(self):
+        if self.enabled and self._run:
+            try:
+                import wandb
+
+                wandb.finish()
+            except Exception:
+                pass
+
+
+class ConsoleCallback:
+    """Legacy console logging callback for non-Lightning trainer."""
+
+    def __init__(self, log_interval: int = 10, timing_log_interval: int = 10):
+        self.log_interval = log_interval
+        self.timing_log_interval = timing_log_interval
+        self._step_times = []
+
+    def on_step_start(self):
+        pass
+
+    def on_step_end(
+        self,
+        step: int,
+        metrics: Dict[str, Any],
+        tokens_in_step: int,
+        timings: Optional[Dict] = None,
+    ):
+        if step % self.log_interval != 0:
+            return
+        loss = metrics.get("train/loss", 0.0)
+        lr = metrics.get("train/lr", 0.0)
+        grad_norm = metrics.get("train/grad_norm", 0.0)
+
+        msg = f"Step {step}: loss={loss:.4f} | lr={lr:.2e} | grad_norm={grad_norm:.4f}"
+
+        if timings and "step_total" in timings:
+            step_time_ms = timings["step_total"] * 1000
+            tok_per_sec = tokens_in_step / max(timings["step_total"], 1e-6)
+            msg += f" | step_time={step_time_ms:.1f}ms | tok/s={tok_per_sec:.0f}"
+
+        logger.info(msg)
+
+    def on_health_report(self, report):
+        if report.has_error:
+            logger.error(f"Health Error: {'; '.join(report.messages)}")
+        elif report.has_warning:
+            logger.warning(f"Health Warning: {'; '.join(report.messages)}")
+
+    def on_stage_transition(self, old_stage: int, new_stage: int, step: int):
+        logger.info(
+            f"Curriculum Transition: Stage {old_stage} -> {new_stage} at step {step}"
+        )

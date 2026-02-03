@@ -42,6 +42,7 @@ class PropagatorConfig:
     laplacian_sparsity: int = 5
     lazy_cg: bool = True
     lazy_cg_tol: float = 1e-6  # Residual gate tolerance for lazy CG
+    pit_gamma: float = 1.0  # Soliton envelope width (SEOP Fix 29)
 
 
 @dataclass
@@ -75,6 +76,8 @@ class TrainingConfig:
     micro_batch_size: int = 4
     gradient_checkpointing: bool = True
     unitary_lambda: float = 0.1
+    low_vram_mode: bool = False
+    born_chunk_size: int = 2048
 
     # Logging
     log_interval: int = 10

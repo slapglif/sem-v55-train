@@ -89,12 +89,9 @@ def print_system_info():
         logger.info(f"bf16 supported: {torch.cuda.is_bf16_supported()}")
     elif hasattr(torch, "xpu") and torch.xpu.is_available():
         logger.info(f"XPU available: True")
-        logger.info(f"XPU version: {torch.xpu.xpu_version}")
         logger.info(f"GPU: {torch.xpu.get_device_name(0)}")
         props = torch.xpu.get_device_properties(0)
         logger.info(f"VRAM: {props.total_memory / 1024**3:.1f}GB")
-        logger.info(f"EUs: {props.execution_units}")
-        logger.info(f"bf16 supported: True (Intel XPU)")
     logger.info(f"CPU cores: {os.cpu_count()}")
     logger.info("=" * 60)
 

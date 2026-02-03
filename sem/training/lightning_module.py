@@ -61,6 +61,8 @@ class SEMLightningModule(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         token_ids, token_freqs = batch
+        if getattr(self.config.training, "low_vram_mode", False):
+            token_freqs = None
 
         if self.config.distillation.enabled and self.ema_teacher is None:
             # Check if we should enable at this stage
@@ -127,6 +129,17 @@ class SEMLightningModule(L.LightningModule):
             weight_decay=self.config.training.weight_decay,
             temperature=1e-5,
         )
+
+        # IPEX optimizer wrapping for XPU (if available)
+        if self.device.type == "xpu":
+            try:
+                import intel_extension_for_pytorch as ipex
+
+                logger.info("Wrapping optimizer with IPEX optimizations...")
+                optimizer = ipex.optimize(optimizer)
+            except ImportError:
+                logger.debug("IPEX not available; using standard optimizer on XPU")
+
         scheduler = WSDScheduler(
             optimizer,
             warmup_steps=self.config.training.warmup_steps,

@@ -24,12 +24,14 @@ spinor:
 
 propagator:
   cayley_dt: 0.01
-  cg_max_iter: 50
-  cg_tol: 1.0e-5
+  cg_max_iter: 3
+  cg_tol: 1.0e-7
   nonlinear_alpha: 0.01
   laplacian_sparsity: 8
+  pit_gamma: 1.0
 
 quantizer:
+
   codebook_size: 512
   group_size: 2
   fisher_ema_decay: 0.999
@@ -45,7 +47,7 @@ training:
   # Throughput Aggression
   batch_size: 16
   micro_batch_size: 2
-  gradient_checkpointing: false
+  gradient_checkpointing: true
 
 
   

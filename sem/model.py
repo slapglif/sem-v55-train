@@ -45,6 +45,7 @@ class SEMModel(nn.Module):
             sinkhorn_max_iter=c.encoder.sinkhorn_max_iter,
             sinkhorn_tol=c.encoder.sinkhorn_tol,
             max_seq_length=c.model.max_seq_length,
+            low_vram_mode=c.training.low_vram_mode,
         )
 
         # 2. Complex Mamba-3 Spinor Layers
@@ -73,6 +74,7 @@ class SEMModel(nn.Module):
             laplacian_sparsity=c.propagator.laplacian_sparsity,
             lazy_cg=c.propagator.lazy_cg,
             lazy_cg_tol=c.propagator.lazy_cg_tol,
+            pit_gamma=c.propagator.pit_gamma,
         )
 
         # 4. Final normalization before collapse
@@ -116,6 +118,31 @@ class SEMModel(nn.Module):
 
         # 4. Final norm
         psi = self.final_norm(psi)  # [B, S, D] complex64
+
+        if (
+            self.training
+            and targets is not None
+            and getattr(self.config.training, "low_vram_mode", False)
+        ):
+            psi_train = psi[:, :-1, :]
+            target_ids = targets[:, 1:]
+            chunk_size = getattr(self.config.training, "born_chunk_size", 2048)
+            target_amp_sq, amp_sq_sum = self.sampler.compute_target_amp_sq_and_sum(
+                psi_train, target_ids, chunk_size=chunk_size
+            )
+
+            floor = (amp_sq_sum / self.sampler.vocab_size) * 1e-6 + 1e-30
+            nll_term = -torch.log(target_amp_sq + floor).mean()
+
+            unitary_lambda = self.config.training.unitary_lambda
+            unitary_divergence = (torch.log(amp_sq_sum + 1e-12) ** 2).mean()
+            unitary_term = unitary_lambda * unitary_divergence
+
+            loss = nll_term + unitary_term
+            return {
+                "loss": loss,
+                "unitary_divergence": unitary_divergence,
+            }
 
         # 5. Collapse: Born rule sampling
         output = self.sampler(psi, sample=not self.training)
