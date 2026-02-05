@@ -286,7 +286,7 @@ class ComplexMamba3Layer(nn.Module):
         # For complex Gaussian z, |z|² ~ Exponential(1/2σ²). Using CDF gate
         # 1-exp(-|z|²·β) instead of sigmoid gives uniformly distributed gate values,
         # maximizing gradient information. Initialize β=exp(0)=1 for unit-variance match.
-        self.activation_threshold = nn.Parameter(torch.tensor(5.18))  # SEOP: ln(D * ln(2)) for 50% gate at RMSNorm scale
+        self.activation_threshold = nn.Parameter(torch.tensor(0.0))  # Reverted: sparse gate is a feature, not a bug
 
         # SEOP Fix 17+52: Per-dimension SSM output scaling
         # Init to 1.0 (not 2.5) — with scaled embedding init (Fix 52), the SSM output
