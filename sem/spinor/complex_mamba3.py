@@ -87,14 +87,13 @@ class ComplexSSMState(nn.Module):
         self.log_A_mag = nn.Parameter(
             torch.rand(mimo_groups, state_dim) * 0.1 - 4.55  # softplus(-4.55..-4.45) ≈ 0.0106
         )
-        # SEOP Fix 53: Zero-init phase to prevent gradient cancellation.
-        # Random phase causes A^n = |A|^n * exp(i*n*θ) to destructively interfere
-        # across state dimensions in the backward pass, reducing gradient magnitude
-        # from O(N) to O(√N). Zero phase makes the recurrence pure-real at init
-        # (like standard Mamba/S4), allowing coherent gradient flow. The model
-        # learns useful rotation frequencies during training.
+        # SEOP: Small random init for rotational diversity.
+        # Zero phase collapses all state dims to pure-real at init, preventing
+        # the model from discovering useful rotation frequencies early in training.
+        # Small noise (σ=0.1) gives initial phase diversity while keeping
+        # A^n interference manageable (constructive within ~10 steps).
         self.A_phase = nn.Parameter(
-            torch.zeros(mimo_groups, state_dim)
+            torch.randn(mimo_groups, state_dim) * 0.1  # SEOP: initial rotational diversity
         )
 
         # B projection: input -> state (complex linear, fused)
@@ -287,7 +286,7 @@ class ComplexMamba3Layer(nn.Module):
         # For complex Gaussian z, |z|² ~ Exponential(1/2σ²). Using CDF gate
         # 1-exp(-|z|²·β) instead of sigmoid gives uniformly distributed gate values,
         # maximizing gradient information. Initialize β=exp(0)=1 for unit-variance match.
-        self.activation_threshold = nn.Parameter(torch.tensor(0.0))
+        self.activation_threshold = nn.Parameter(torch.tensor(5.18))  # SEOP: ln(D * ln(2)) for 50% gate at RMSNorm scale
 
         # SEOP Fix 17+52: Per-dimension SSM output scaling
         # Init to 1.0 (not 2.5) — with scaled embedding init (Fix 52), the SSM output

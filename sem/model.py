@@ -97,6 +97,16 @@ class SEMModel(nn.Module):
         # SEOP Fix 51: Weight tying — share embedding weights with output projection
         self.sampler.proj_real.weight = self.encoder.embedding.weight
 
+        # SEOP: Initialize output bias to approximate Zipf distribution for faster convergence
+        # This front-loads unigram knowledge so the model focuses on contextual learning
+        # instead of spending thousands of steps learning token frequencies.
+        with torch.no_grad():
+            # Approximate Zipf: log(1/(rank+1)) for rank 0..V-1
+            ranks = torch.arange(1, self.config.model.vocab_size + 1, dtype=torch.float32)
+            log_freqs = -torch.log(ranks)
+            log_freqs = log_freqs - log_freqs.logsumexp(0)  # normalize to valid log-probs
+            self.sampler.output_bias.data.copy_(log_freqs)
+
         # SEOP Fix 45: Propagator warmup bypass for 3x throughput during early training
         # Set to True after warmup_steps to enable full propagation
         self.propagator_enabled = False

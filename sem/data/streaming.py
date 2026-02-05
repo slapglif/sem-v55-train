@@ -324,7 +324,8 @@ class PackedStreamingDataset(IterableDataset):
         yield from packer.pack(iter(stream))
 
     def create_dataloader(
-        self, batch_size: int, num_workers: int = 4, pin_memory: bool = True
+        self, batch_size: int, num_workers: int = 4, pin_memory: bool = True,
+        prefetch_factor: int = 4,
     ) -> DataLoader:
         """Create a DataLoader for this dataset.
 
@@ -332,6 +333,7 @@ class PackedStreamingDataset(IterableDataset):
             batch_size: Batch size
             num_workers: Number of data loading workers
             pin_memory: Pin memory for CUDA
+            prefetch_factor: Number of batches each worker pre-fetches (default 4)
         Returns:
             PyTorch DataLoader
         """
@@ -342,15 +344,26 @@ class PackedStreamingDataset(IterableDataset):
         import sys
 
         effective_workers = num_workers if sys.platform != "win32" else 0
+        use_pin = pin_memory and batch_size > 0
+
+        # prefetch_factor and persistent_workers only valid when num_workers > 0
+        extra_kwargs = {}
+        if effective_workers > 0:
+            extra_kwargs["prefetch_factor"] = prefetch_factor
+            extra_kwargs["persistent_workers"] = True
+
         dl = DataLoader(
             self,
             batch_size=batch_size,
             num_workers=effective_workers,
-            pin_memory=pin_memory and batch_size > 0,
+            pin_memory=use_pin,
             drop_last=True,
+            **extra_kwargs,
         )
         logger.info(
             f"[DATA] DataLoader created in {time.perf_counter() - t_dl:.3f}s "
-            f"(batch_size={batch_size}, workers={effective_workers}, pin_memory={pin_memory and batch_size > 0})"
+            f"(batch_size={batch_size}, workers={effective_workers}, "
+            f"pin_memory={use_pin}, prefetch={extra_kwargs.get('prefetch_factor', 'N/A')}, "
+            f"persistent={extra_kwargs.get('persistent_workers', False)})"
         )
         return dl

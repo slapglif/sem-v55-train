@@ -68,7 +68,7 @@ class MESHEncoder(nn.Module):
             # Re(z) = embedding (stays in embedding space for weight tying).
             # Im(z) = learned projection (additional capacity for phase dynamics).
             self.imag_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
-            nn.init.xavier_uniform_(self.imag_proj.weight, gain=0.3)  # SEOP Fix 56: Larger init for Im channel utilization
+            nn.init.xavier_uniform_(self.imag_proj.weight, gain=1.0)  # SEOP: circular Gaussian for full phase utilization
         else:
             # Cost matrix module
             self.cost = LearnedCostMatrix(hidden_dim, sdr_candidates)

@@ -358,7 +358,7 @@ class SEMTrainer:
             return
         c = self.config.training
         if self.device.type == "cuda":
-            total_vram = torch.cuda.get_device_properties(0).total_mem
+            total_vram = torch.cuda.get_device_properties(0).total_memory
         else:
             return
         target_vram = int(total_vram * 0.85)
