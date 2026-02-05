@@ -57,12 +57,12 @@ training:
   dtype: float32           # Real-Block Isomorphism (R2) mapping
   
   # Optimization
-  learning_rate: 1.0e-6
-  weight_decay: 0.1
-  warmup_steps: 8000
+  learning_rate: 5.0e-5  # Increased from 1e-6 (which was far too conservative)
+  weight_decay: 0.05     # Reduced from 0.1 to prevent over-regularization
+  warmup_steps: 2000     # Reduced from 8000 for faster convergence start
   max_steps: 100000
-  gradient_clip: 0.2
-  unitary_lambda: 0.005
+  gradient_clip: 0.5     # Increased from 0.2 for more tolerance to gradient spikes
+  unitary_lambda: 0.01   # Increased from 0.005 for stronger unitarity enforcement
 
 
   # Data Pipeline (RAM Optimized)

@@ -12,7 +12,7 @@ def main():
         print("ERROR: Set HF_TOKEN environment variable")
         return 1
 
-    repo_id = "icarus112/sem-v55-lean-crystal"
+    repo_id = "GAInTech/sem-v55-lean-crystal"
 
     # Upload current code to Hub
     print(f"Uploading code to {repo_id}...")
@@ -29,7 +29,7 @@ def main():
         repo_id=repo_id,
         repo_type="model",
         token=token,
-        ignore_patterns=["__pycache__", "*.pyc", ".venv", ".git", "*.log"],
+        ignore_patterns=["__pycache__", "*.pyc", ".venv", ".venv/**", ".git", ".git/**", "*.log", ".claude", ".claude/**", ".letta", ".letta/**", "runs", "runs/**", "*.pt", "*.ckpt"],
     )
     print("Upload complete!")
 
@@ -47,26 +47,27 @@ E=$(pytime); echo "[STAGE 1/4] Done in $(pdiff $S $E)s"
 
 banner "[STAGE 2/4] Installing dependencies via UV..."
 S=$(pytime)
-uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]'
+uv pip install --system datasets tokenizers pyyaml scipy einops wandb pytorch-lightning rich 'huggingface_hub[hf_xet]'
 E=$(pytime); echo "[STAGE 2/4] Done in $(pdiff $S $E)s"
 
 banner "[STAGE 3/4] Downloading model repo..."
 S=$(pytime)
-REPO_PATH=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('icarus112/sem-v55-lean-crystal', repo_type='model'))")
+REPO_PATH=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('GAInTech/sem-v55-lean-crystal', repo_type='model'))")
 E=$(pytime); echo "[STAGE 3/4] Repo downloaded to $REPO_PATH in $(pdiff $S $E)s"
 
 banner "[STAGE 4/4] Starting training..."
 cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
-python3 hf_train.py --config configs/a100_optimized.yaml --push-to-hub icarus112/sem-v55-lean-crystal --no-compile --no-wandb"""
+python3 hf_train_lightning.py --config configs/h100_max.yaml --push-to-hub GAInTech/sem-v55-lean-crystal"""
 
     job = api.run_job(
         image="pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
         command=["bash", "-c", cmd],
-        flavor="l40sx1",
-        timeout=7200,
+        flavor="a100-large",
+        timeout=14400,  # 4 hours
         secrets={"HF_TOKEN": token},
+        namespace="GAInTech",  # Bill to organization, not personal account
     )
 
     print(f"\n{'=' * 60}")

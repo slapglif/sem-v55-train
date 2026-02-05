@@ -125,3 +125,54 @@ class TestComplexMamba3Layer:
 
         assert not torch.isnan(y).any(), "NaN in layer output"
         assert not torch.isinf(y).any(), "Inf in layer output"
+
+    @pytest.mark.skipif(
+        not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(),
+        reason="CUDA with bfloat16 support required"
+    )
+    def test_mixed_precision_a(self):
+        """Mixed precision (bfloat16 A) should produce accurate results.
+
+        SEOP Fix 23: A tensor is bounded in (0, 1), making bfloat16 safe
+        with <1% mean relative error and 25% memory bandwidth reduction.
+        """
+        from sem.spinor.complex_mamba3 import ComplexMamba3Layer
+
+        device = "cuda"
+
+        # Create layers with and without mixed precision
+        layer_mp = ComplexMamba3Layer(
+            hidden_dim=64, state_dim=16,
+            mimo_groups=4, block_size=8, d_conv=4,
+            use_mixed_precision_a=True,
+        ).to(device)
+
+        layer_fp = ComplexMamba3Layer(
+            hidden_dim=64, state_dim=16,
+            mimo_groups=4, block_size=8, d_conv=4,
+            use_mixed_precision_a=False,
+        ).to(device)
+
+        # Share weights
+        layer_fp.load_state_dict(layer_mp.state_dict())
+
+        x = torch.randn(2, 32, 64, dtype=torch.complex64, device=device)
+
+        y_mp = layer_mp(x)
+        y_fp = layer_fp(x)
+
+        # Check output is complex and correct shape
+        assert y_mp.is_complex()
+        assert y_mp.shape == x.shape
+
+        # Check numerical accuracy: <1% mean relative error
+        rel_error = (y_mp - y_fp).abs() / (y_fp.abs() + 1e-8)
+        mean_rel_error = rel_error.mean().item()
+        assert mean_rel_error < 0.01, \
+            f"Mixed precision error too high: {mean_rel_error:.4%}"
+
+        # Check gradients flow correctly
+        y_mp.abs().sum().backward()
+        for name, p in layer_mp.named_parameters():
+            assert p.grad is not None, f"No gradient for {name}"
+            assert not p.grad.isnan().any(), f"NaN gradient for {name}"

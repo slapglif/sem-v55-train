@@ -12,6 +12,7 @@ The model processes token sequences through:
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 from typing import Optional
 
@@ -35,7 +36,7 @@ class SEMModel(nn.Module):
         self.config = config
         c = config  # Shorthand
 
-        # 1. MESH-SDR Encoder
+        # 1. MESH-SDR Encoder (or simple mode for direct embedding)
         self.encoder = MESHEncoder(
             vocab_size=c.model.vocab_size,
             hidden_dim=c.model.hidden_dim,
@@ -46,6 +47,9 @@ class SEMModel(nn.Module):
             sinkhorn_tol=c.encoder.sinkhorn_tol,
             max_seq_length=c.model.max_seq_length,
             low_vram_mode=c.training.low_vram_mode,
+            soft_sparse=c.encoder.soft_sparse,
+            soft_sparse_temp=c.encoder.soft_sparse_temp,
+            simple_mode=c.encoder.simple_mode,
         )
 
         # 2. Complex Mamba-3 Spinor Layers
@@ -90,6 +94,14 @@ class SEMModel(nn.Module):
             top_p=c.sampler.top_p,
         )
 
+        # SEOP Fix 51: Weight tying — share embedding weights with output projection
+        self.sampler.proj_real.weight = self.encoder.embedding.weight
+
+        # SEOP Fix 45: Propagator warmup bypass for 3x throughput during early training
+        # Set to True after warmup_steps to enable full propagation
+        self.propagator_enabled = False
+        self._propagator_warmup_steps = c.training.warmup_steps
+
     def forward(
         self,
         token_ids: Tensor,
@@ -114,59 +126,28 @@ class SEMModel(nn.Module):
         for mamba_layer in self.mamba_layers:
             psi = mamba_layer(psi)  # [B, S, D] complex64
 
-        # 3. Propagate: Cayley-Soliton diffusion
-        psi = self.propagator(psi)  # [B, S, D] complex64
+        # 3. Propagate: Cayley-Soliton diffusion (SEOP Fix 45: skip during warmup for 3x throughput)
+        if self.propagator_enabled:
+            psi = self.propagator(psi)  # [B, S, D] complex64
+        # else: identity pass during warmup - CG solve is expensive and not needed early
 
         # 4. Final norm
         psi = self.final_norm(psi)  # [B, S, D] complex64
 
-        if (
-            self.training
-            and targets is not None
-            and getattr(self.config.training, "low_vram_mode", False)
-        ):
-            psi_train = psi[:, :-1, :]
-            target_ids = targets[:, 1:]
-            chunk_size = getattr(self.config.training, "born_chunk_size", 2048)
-            target_amp_sq, amp_sq_sum = self.sampler.compute_target_amp_sq_and_sum(
-                psi_train, target_ids, chunk_size=chunk_size
-            )
-
-            floor = (amp_sq_sum / self.sampler.vocab_size) * 1e-6 + 1e-30
-            nll_term = -torch.log(target_amp_sq + floor).mean()
-
-            unitary_lambda = self.config.training.unitary_lambda
-            unitary_divergence = (torch.log(amp_sq_sum + 1e-12) ** 2).mean()
-            unitary_term = unitary_lambda * unitary_divergence
-
-            loss = nll_term + unitary_term
-            return {
-                "loss": loss,
-                "unitary_divergence": unitary_divergence,
-            }
-
-        # 5. Collapse: Born rule sampling
+        # 5. Collapse: log-linear projection (SEOP Fix 48)
         output = self.sampler(psi, sample=not self.training)
 
         # Compute loss if targets provided
         if targets is not None:
             # Shift for next-token prediction: predict token[t+1] from state[t]
-            amp_sq = output["amp_sq"][:, :-1, :].contiguous()
+            logits = output["logits"][:, :-1, :].contiguous()
             target_ids = targets[:, 1:].contiguous()
-
-            target_amp_sq = torch.gather(amp_sq, -1, target_ids.unsqueeze(-1)).squeeze(
-                -1
+            loss = F.cross_entropy(
+                logits.view(-1, logits.shape[-1]),
+                target_ids.view(-1),
+                label_smoothing=self.config.training.label_smoothing,
             )
-            nll_term = -torch.log(target_amp_sq + 1e-12).mean()
-
-            unitary_lambda = self.config.training.unitary_lambda
-            amp_sq_sum = amp_sq.sum(dim=-1)
-            unitary_divergence = (torch.log(amp_sq_sum + 1e-12) ** 2).mean()
-            unitary_term = unitary_lambda * unitary_divergence
-
-            loss = nll_term + unitary_term
             output["loss"] = loss
-            output["unitary_divergence"] = unitary_divergence
 
         return output
 
@@ -227,8 +208,12 @@ class SEMModel(nn.Module):
             input_ids = generated[:, -self.config.model.max_seq_length :]
 
             # Forward pass
+            psi = self._encode_and_context(input_ids)
+            if self.propagator_enabled:
+                psi = self.propagator(psi)
+            psi = self.final_norm(psi)
             output = self.sampler(
-                self.final_norm(self.propagator(self._encode_and_context(input_ids))),
+                psi,
                 temperature=temperature,
                 top_k=top_k,
                 top_p=top_p,

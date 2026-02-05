@@ -5,6 +5,7 @@ sem/generate.py
 sem/model.py
 sem/train.py
 sem/data/__init__.py
+sem/data/lightning_datamodule.py
 sem/data/streaming.py
 sem/data/tokenizer.py
 sem/encoder/__init__.py
@@ -26,6 +27,7 @@ sem/sampler/born_collapse.py
 sem/spinor/__init__.py
 sem/spinor/complex_mamba3.py
 sem/spinor/complex_ops.py
+sem/spinor/complex_pscan.py
 sem/spinor/spinor_block.py
 sem/training/__init__.py
 sem/training/callbacks.py
@@ -33,8 +35,11 @@ sem/training/checkpoint.py
 sem/training/curriculum.py
 sem/training/distillation.py
 sem/training/health.py
+sem/training/lightning_module.py
+sem/training/precision_plugin.py
 sem/training/scheduler.py
 sem/training/trainer.py
+sem/training/xpu_accelerator.py
 sem/utils/__init__.py
 sem/utils/complex_adamw.py
 sem/utils/complex_layernorm.py
@@ -48,6 +53,7 @@ sem_v55_lean_crystal.egg-info/SOURCES.txt
 sem_v55_lean_crystal.egg-info/dependency_links.txt
 sem_v55_lean_crystal.egg-info/requires.txt
 sem_v55_lean_crystal.egg-info/top_level.txt
+tests/test_adaptive_chunk_pscan.py
 tests/test_born.py
 tests/test_cayley.py
 tests/test_complex_mamba.py

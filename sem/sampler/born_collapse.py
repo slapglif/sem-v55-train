@@ -1,38 +1,38 @@
-"""Born Collapse Sampler for token generation.
+"""Log-Linear Collapse Sampler for token generation.
 
-Implements the Born rule from quantum mechanics for token sampling:
-    P(token) = |ψ_token|²
+SEOP Fix 48: Replaced quadratic Born rule |W·psi|^2 with log-linear projection.
 
-The wavefunction ψ (complex-valued, from the Cayley propagator) is
-projected onto the vocabulary space. The squared magnitude of each
-component gives the probability of generating that token.
+The Born rule P(token) = |W·psi|^2 has a fundamental rank deficiency:
+    image_dim = D(2D+1) = 32,896 < V = 50,262 for D=128
+This means the model CANNOT produce arbitrary probability distributions.
 
-This is the final "measurement" step that collapses the continuous
-crystal manifold representation into a discrete token.
+Log-linear projection: logits = W_r @ Re(psi) + W_i @ Im(psi) + bias
+Uses 2D = 256 real degrees of freedom -> full rank for any V.
+Standard softmax cross-entropy loss applies directly.
 
 Supports:
 - Temperature-controlled sampling
-- Top-k filtering (keep k highest probability tokens)
-- Top-p (nucleus) filtering (keep tokens with cumulative p >= threshold)
+- Top-k filtering
+- Top-p (nucleus) filtering
 - Greedy decoding (argmax)
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 from torch import Tensor
-from typing import Optional, Tuple
+from typing import Optional
 
 
 class BornCollapseSampler(nn.Module):
-    """Born rule sampler: complex wavefunction -> token probabilities.
+    """Log-linear sampler: complex wavefunction -> vocabulary logits -> token probabilities.
 
     Architecture:
-    1. Complex-to-real vocabulary projection
-    2. Born rule: P = |amplitude|^2 (computed in log-space for stability)
-    3. Temperature scaling
-    4. Top-k / Top-p filtering
-    5. Categorical sampling or argmax
+    1. Linear projection of complex wavefunction to vocabulary logits
+    2. Temperature scaling
+    3. Top-k / Top-p filtering
+    4. Categorical sampling or argmax
     """
 
     def __init__(
@@ -50,159 +50,50 @@ class BornCollapseSampler(nn.Module):
         self.top_k = top_k
         self.top_p = top_p
 
-        # Complex-to-real vocabulary projection
-        # ψ (complex, dim D) -> amplitude (complex, dim V)
-        # Uses 2 real Linear layers: (W_r + iW_i) @ (ψ_re + iψ_im)
-        # = W_r@ψ_re - W_i@ψ_im + i(W_r@ψ_im + W_i@ψ_re)
-        # NOTE: For large V (32K+), 4 contiguous float32 GEMMs outperform
-        # complex64 BLAS which has non-contiguous memory and 3 matmul overhead.
+        # Log-linear vocabulary projection
+        # logits = W_r @ Re(psi) + W_i @ Im(psi) + bias
         self.proj_real = nn.Linear(hidden_dim, vocab_size, bias=False)
         self.proj_imag = nn.Linear(hidden_dim, vocab_size, bias=False)
-
-        # Output bias (real-valued)
         self.output_bias = nn.Parameter(torch.zeros(vocab_size))
 
-    def compute_log_born_probs(
-        self, psi: Tensor
-    ) -> Tuple[Tensor, Tensor, Tensor]:
-        """Project complex wavefunction and compute log|amplitude|^2.
+    def compute_logits(self, psi: Tensor) -> Tensor:
+        """Project complex wavefunction to vocabulary logits.
 
-        Numerically stable implementation:
-        - Avoids sqrt() followed by log()
-        - Directly computes log(re^2 + im^2) for Born rule
+        SEOP Fix 48: Linear projection replaces quadratic Born rule.
+        logits = W_r @ Re(psi) + W_i @ Im(psi) + bias
 
         Args:
             psi: [B, S, D] complex64 wavefunction
         Returns:
-            log_probs_unnorm: [B, S, V] float32 unnormalized log-probabilities
-            amp_sq: [B, S, V] normalized Born probabilities (sums to 1.0 across V)
-            amp_sq_sum_normalized: [B, S] sum of |ψ|² divided by hidden_dim (should be ~1.0 for unit norm)
+            logits: [B, S, V] float32
         """
-        # Complex projection: amp = (W_r + iW_i) @ (ψ_re + iψ_im)
-        amp_real = self.proj_real(psi.real) - self.proj_imag(psi.imag)
-        amp_imag = self.proj_real(psi.imag) + self.proj_imag(psi.real)
-
-        # SEOP Fix 3: Rotationally-symmetric Born rule
-        # Adding bias to real part only creates a preferential axis in the complex plane.
-        # Instead, add bias in log-magnitude space to preserve rotational symmetry.
-        # log P = log(re² + im²) + bias  (bias shifts log-probability uniformly)
-        # SEOP Fix 16: Adaptive Born floor
-        # Fixed 1e-12 creates a hard gradient wall at log(1e-12) ≈ -27.6 for rare tokens.
-        # Adaptive floor = mean(amp²) * 1e-6 keeps floor 60dB below signal mean,
-        # maintaining gradient flow for rare tokens proportional to actual amplitude scale.
-        amp_sq_raw = amp_real**2 + amp_imag**2
-
-        # SEOP Fix 17: Born rule normalization
-        # Raw |ψ|² doesn't sum to 1.0 (typically sums to ~D due to projection from D-dim hidden).
-        # Proper Born rule requires P(token) = |ψ_token|² / Σ|ψ_i|² to be a valid probability.
-        # Normalize across vocab dimension to get valid probabilities for loss computation.
-        amp_sq_sum_raw = amp_sq_raw.sum(dim=-1, keepdim=True)
-        amp_sq = amp_sq_raw / (amp_sq_sum_raw + 1e-12)  # Now sums to 1.0 across vocab
-
-        # SEOP Fix 32: Proper unitary divergence normalization
-        # The unitary divergence should measure deviation from unit norm in LOG space.
-        # Original: (log(sum))^2 explodes when sum >> 1 (e.g., 21000 -> loss=100)
-        # Fixed: log((sum/D)^2) = 2*log(sum/D) measures deviation from expected magnitude
-        # Expected sum ≈ hidden_dim due to projection from D-dimensional space
-        # This keeps unitary divergence stable and interpretable
-        amp_sq_sum_normalized = amp_sq_sum_raw / self.hidden_dim  # Should be ~1.0 if unit norm
-
-        floor = amp_sq.mean(dim=-1, keepdim=True) * 1e-6 + 1e-30  # 60dB below mean
-        log_amp_sq = torch.log(amp_sq + floor)
-        log_probs_unnorm = log_amp_sq + self.output_bias
-
-        return log_probs_unnorm, amp_sq, amp_sq_sum_normalized.squeeze(-1)
-
-    def compute_target_amp_sq_and_sum(
-        self, psi: Tensor, target_ids: Tensor, chunk_size: int = 2048
-    ) -> Tuple[Tensor, Tensor]:
-        psi_real = psi.real
-        psi_imag = psi.imag
-        weight_real = self.proj_real.weight
-        weight_imag = self.proj_imag.weight
-
-        w_real_t = F.embedding(target_ids, weight_real)
-        w_imag_t = F.embedding(target_ids, weight_imag)
-
-        amp_real_t = (psi_real * w_real_t - psi_imag * w_imag_t).sum(dim=-1)
-        amp_imag_t = (psi_real * w_imag_t + psi_imag * w_real_t).sum(dim=-1)
-        target_amp_sq = amp_real_t**2 + amp_imag_t**2
-        target_amp_sq = torch.clamp(target_amp_sq, max=1e6)
-
-        vocab_size = weight_real.shape[0]
-        amp_sq_sum = torch.zeros_like(target_amp_sq)
-        for start in range(0, vocab_size, chunk_size):
-            end = min(start + chunk_size, vocab_size)
-            w_real = weight_real[start:end]
-            w_imag = weight_imag[start:end]
-            amp_real = torch.matmul(psi_real, w_real.t()) - torch.matmul(
-                psi_imag, w_imag.t()
-            )
-            amp_imag = torch.matmul(psi_real, w_imag.t()) + torch.matmul(
-                psi_imag, w_real.t()
-            )
-            amp_sq_chunk = (amp_real**2 + amp_imag**2).sum(dim=-1)
-            amp_sq_sum += torch.clamp(amp_sq_chunk, max=1e8)
-
-        amp_sq_sum = torch.clamp(amp_sq_sum, max=1e9)
-
-        # SEOP Fix 32: Normalize by hidden_dim to match expected magnitude
-        amp_sq_sum_normalized = amp_sq_sum / self.hidden_dim
-        return target_amp_sq, amp_sq_sum_normalized
+        return self.proj_real(psi.real) + self.proj_imag(psi.imag) + self.output_bias
 
     def apply_temperature(
         self, logits: Tensor, temperature: Optional[float] = None
     ) -> Tensor:
-        """Apply temperature scaling to logits.
-
-        Args:
-            logits: [B, S, V] unnormalized log-probabilities
-            temperature: Sampling temperature (default: self.temperature)
-        Returns:
-            scaled_logits: [B, S, V]
-        """
+        """Apply temperature scaling to logits."""
         temp = temperature if temperature is not None else self.temperature
         return logits / max(temp, 1e-8)
 
     def apply_top_k(self, logits: Tensor, k: Optional[int] = None) -> Tensor:
-        """Apply top-k filtering: zero out all but top-k logits.
-
-        Args:
-            logits: [B, S, V]
-            k: Number of top tokens to keep
-        Returns:
-            Filtered logits
-        """
+        """Apply top-k filtering: mask all but top-k logits."""
         k = k if k is not None else self.top_k
         if k <= 0 or k >= logits.shape[-1]:
             return logits
-
         topk_vals, _ = torch.topk(logits, k, dim=-1)
         threshold = topk_vals[..., -1:]
-
         return logits.masked_fill(logits < threshold, float("-inf"))
 
     def apply_top_p(self, logits: Tensor, p: Optional[float] = None) -> Tensor:
-        """Apply nucleus (top-p) filtering.
-
-        Keep the smallest set of tokens whose cumulative probability >= p.
-
-        Args:
-            logits: [B, S, V]
-            p: Cumulative probability threshold
-        Returns:
-            Filtered logits
-        """
+        """Apply nucleus (top-p) filtering."""
         p = p if p is not None else self.top_p
         if p >= 1.0:
             return logits
-
         sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
         sorted_mask = (cumulative_probs - F.softmax(sorted_logits, dim=-1)) >= p
         sorted_logits[sorted_mask] = float("-inf")
-
         logits = logits.scatter(-1, sorted_indices, sorted_logits)
         return logits
 
@@ -214,7 +105,7 @@ class BornCollapseSampler(nn.Module):
         top_p: Optional[float] = None,
         sample: bool = True,
     ) -> dict:
-        """Full Born collapse: wavefunction -> token.
+        """Log-linear collapse: wavefunction -> token.
 
         Args:
             psi: [B, S, D] complex64 wavefunction
@@ -225,39 +116,26 @@ class BornCollapseSampler(nn.Module):
 
         Returns:
             dict with:
-                'logits': [B, S, V] raw logits (for training loss)
-                'log_probs': [B, S, V] log softmax (for cross-entropy)
-                'amp_sq': [B, S, V] normalized Born probabilities (sum to 1.0)
-                'amp_sq_sum_raw': [B, S] sum divided by hidden_dim (SEOP Fix 32: normalized for unitary loss)
+                'logits': [B, S, V] raw logits
+                'log_probs': [B, S, V] log softmax
                 'tokens': [B, S] sampled token indices (if sample=True)
                 'probs': [B, S, V] probabilities (if sample=True)
         """
-        # Step 1: Born rule projection -> log|amplitude|^2
-        log_probs_unnorm, amp_sq, amp_sq_sum_raw = self.compute_log_born_probs(
-            psi
-        )  # [B, S, V], [B, S, V], [B, S]
-
-        # Step 2: Temperature scaling
-        logits = self.apply_temperature(log_probs_unnorm, temperature)  # [B, S, V]
+        logits = self.compute_logits(psi)
+        scaled_logits = self.apply_temperature(logits, temperature)
 
         result = {
             "logits": logits,
-            "log_probs": F.log_softmax(logits, dim=-1),
-            "amp_sq": amp_sq,
-            "amp_sq_sum_raw": amp_sq_sum_raw,
+            "log_probs": F.log_softmax(scaled_logits, dim=-1),
         }
 
         if sample:
-            # Step 3: Apply filtering
-            filtered_logits = self.apply_top_k(logits, top_k)
+            filtered_logits = self.apply_top_k(scaled_logits, top_k)
             filtered_logits = self.apply_top_p(filtered_logits, top_p)
-
-            # Step 4: Sample
             probs = F.softmax(filtered_logits, dim=-1)
-            tokens = torch.multinomial(probs.reshape(-1, probs.shape[-1]), 1).reshape(
-                probs.shape[:-1]
-            )
-
+            tokens = torch.multinomial(
+                probs.reshape(-1, probs.shape[-1]), 1
+            ).reshape(probs.shape[:-1])
             result["tokens"] = tokens
             result["probs"] = probs
 
@@ -271,6 +149,5 @@ class BornCollapseSampler(nn.Module):
         Returns:
             log_probs: [B, S, V] float32
         """
-        log_probs_unnorm, _, _ = self.compute_log_born_probs(psi)
-        logits = self.apply_temperature(log_probs_unnorm)
+        logits = self.compute_logits(psi)
         return F.log_softmax(logits, dim=-1)

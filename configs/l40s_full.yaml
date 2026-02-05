@@ -42,7 +42,7 @@ sampler:
 training:
   batch_size: 512
   micro_batch_size: 16
-  gradient_checkpointing: true
+  gradient_checkpointing: false  # Disabled - tensor mismatch bug
   dtype: float32
   learning_rate: 6.0e-4
   weight_decay: 0.01

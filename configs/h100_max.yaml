@@ -1,0 +1,82 @@
+# SEM V5.5 "Lean Crystal" - H100 Maximum Aggression
+# Target: 80GB VRAM H100, maximize throughput
+
+model:
+  hidden_dim: 256           # Larger model for H100
+  num_layers: 12            # More layers
+  vocab_size: 50262         # GPT-2 tokenizer
+  max_seq_length: 512       # Moderate sequence length
+
+encoder:
+  simple_mode: true         # Direct embedding → complex (proven)
+  sdr_sparsity: 16
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.05
+  sinkhorn_max_iter: 20
+  sinkhorn_tol: 1.0e-3
+  soft_sparse: true
+  soft_sparse_temp: 1.0
+
+spinor:
+  block_size: 8
+  num_blocks: 32
+  state_dim: 128
+  mimo_groups: 16
+  d_conv: 4
+
+propagator:
+  cayley_dt: 0.02
+  cg_max_iter: 10
+  cg_tol: 2.0e-3
+  nonlinear_alpha: 0.25
+  laplacian_sparsity: 4
+  lazy_cg: true
+  lazy_cg_tol: 2.0e-3
+
+quantizer:
+  codebook_size: 256
+  group_size: 2
+  fisher_ema_decay: 0.999
+  outlier_percentile: 0.01
+  dead_code_threshold: 50
+
+sampler:
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+training:
+  # H100 Maximum Throughput (reduced batch to avoid OOM)
+  batch_size: 32            # Effective batch (16 micro * 2 accum)
+  micro_batch_size: 16      # Fits in A100 80GB
+  gradient_checkpointing: true  # Saves ~40% VRAM
+  dtype: float32
+  learning_rate: 7.0e-3     # Scaled: sqrt(32/64) * 1e-2
+  no_amp: false             # Use AMP on H100
+  encoder_lr_scale: 1.0
+  weight_decay: 0.01
+  warmup_steps: 200
+  max_steps: 10000          # Fast iteration
+  gradient_clip: 3.0
+  unitary_lambda: 0.0
+  dataset_name: "HuggingFaceFW/fineweb-edu"
+  tokenizer_path: "tokenizer/"
+  num_workers: 8            # Max parallel loading
+  shuffle_buffer_size: 50000
+  scheduler_type: "cosine"
+  stable_steps: 0
+  decay_steps: 10000
+  lr_min_ratio: 0.1
+  label_smoothing: 0.0
+  log_interval: 10
+  health_check_interval: 100
+  checkpoint_interval: 1000
+  keep_checkpoints: 3
+  wandb_project: "sem-v55-h100"
+  wandb_enabled: true
+
+curriculum:
+  enabled: false
+
+distillation:
+  enabled: false

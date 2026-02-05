@@ -25,7 +25,22 @@ class SEMTokenizer:
     def __init__(self, tokenizer_path: str):
         """Load a pre-trained tokenizer from disk."""
         self.tokenizer = Tokenizer.from_file(str(Path(tokenizer_path) / "tokenizer.json"))
+        self._ensure_special_tokens()
         self._setup_ids()
+
+    def _ensure_special_tokens(self):
+        """Add special tokens if they don't exist in the tokenizer."""
+        from tokenizers import AddedToken
+
+        existing_vocab = self.tokenizer.get_vocab()
+        tokens_to_add = []
+
+        for token in self.SPECIAL_TOKENS:
+            if token not in existing_vocab:
+                tokens_to_add.append(AddedToken(token, special=True))
+
+        if tokens_to_add:
+            self.tokenizer.add_special_tokens(tokens_to_add)
 
     def _setup_ids(self):
         self.pad_id = self.tokenizer.token_to_id("<pad>")
@@ -33,6 +48,14 @@ class SEMTokenizer:
         self.bos_id = self.tokenizer.token_to_id("<bos>")
         self.unk_id = self.tokenizer.token_to_id("<unk>")
         self.doc_boundary_id = self.tokenizer.token_to_id("<doc_boundary>")
+
+        # Validate all special tokens have valid IDs
+        for name in ["pad_id", "eos_id", "bos_id", "unk_id", "doc_boundary_id"]:
+            if getattr(self, name) is None:
+                raise ValueError(
+                    f"Special token {name} has no ID. "
+                    f"Tokenizer vocab_size={self.tokenizer.get_vocab_size()}"
+                )
 
     @property
     def vocab_size(self) -> int:

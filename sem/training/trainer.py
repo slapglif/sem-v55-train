@@ -16,6 +16,11 @@ from dataclasses import asdict
 
 from ..config import SEMConfig
 from ..model import SEMModel
+try:
+    from ..model_v8 import SEMV8Model
+    HAS_V8 = True
+except ImportError:
+    HAS_V8 = False
 from ..utils.complex_adamw import ComplexAdamW
 from ..quantizer.has_vq import HASVQ
 from ..data.streaming import PackedStreamingDataset
@@ -60,8 +65,12 @@ class SEMTrainer:
         self.dry_run = dry_run
 
         # Build model
-        logger.info("Building SEM V5.5 model...")
-        self.model = SEMModel(config).to(self.device)
+        if getattr(config.model, 'model_version', 'v55') == 'v8' and HAS_V8:
+            logger.info("Building SEM V8.0 model...")
+            self.model = SEMV8Model(config).to(self.device)
+        else:
+            logger.info("Building SEM V5.5 model...")
+            self.model = SEMModel(config).to(self.device)
         param_counts = self.model.count_parameters()
         logger.info(
             f"Parameters: {param_counts['total']['effective_real']:,} effective real"
@@ -116,12 +125,28 @@ class SEMTrainer:
         elif self.device.type == "xpu":
             logger.info("torch.compile disabled for XPU (eager mode)")
 
-        # Optimizer
+        # Optimizer with per-layer LR scaling (SEOP Fix 48)
+        base_lr = config.training.learning_rate
+        encoder_lr_scale = getattr(config.training, 'encoder_lr_scale', 0.01)
+        encoder_params = []
+        other_params = []
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                if name.startswith('encoder'):
+                    encoder_params.append(param)
+                else:
+                    other_params.append(param)
+        param_groups = [
+            {'params': encoder_params, 'lr': base_lr * encoder_lr_scale, 'name': 'encoder'},
+            {'params': other_params, 'lr': base_lr, 'name': 'other'},
+        ]
+        logger.info(f"Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}")
+        logger.info(f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}")
         self.optimizer = ComplexAdamW(
-            self.model.parameters(),
-            lr=config.training.learning_rate,
+            param_groups,
+            lr=base_lr,
             weight_decay=config.training.weight_decay,
-            temperature=1e-4,  # Thermodynamic noise for TNGD
+            temperature=0,  # SEOP Fix 49: Disable TNGD noise — amplified by 1/denom during warmup
         )
 
         # Scheduler
@@ -197,6 +222,8 @@ class SEMTrainer:
         # Gradient checkpointing
         if config.training.gradient_checkpointing:
             self._enable_gradient_checkpointing()
+        else:
+            logger.info("Gradient checkpointing DISABLED (config.training.gradient_checkpointing=False)")
 
     def _enable_gradient_checkpointing(self):
         """Enable gradient checkpointing on Mamba and Cayley layers.
@@ -413,9 +440,17 @@ class SEMTrainer:
         for pg in self.optimizer.param_groups:
             pg["lr"] *= 0.5
         new_lr = self.optimizer.param_groups[0]["lr"]
+        self._consecutive_nan_steps = getattr(self, "_consecutive_nan_steps", 0) + 1
         logger.warning(
-            f"NaN detected ({reason}) - reducing LR by 50%: {old_lr:.2e} -> {new_lr:.2e}"
+            f"NaN detected ({reason}) - reducing LR by 50%: {old_lr:.2e} -> {new_lr:.2e} "
+            f"(consecutive NaN: {self._consecutive_nan_steps})"
         )
+        if self._consecutive_nan_steps >= 10:
+            logger.error(
+                f"FATAL: {self._consecutive_nan_steps} consecutive NaN steps. "
+                f"Model is irrecoverable. Stopping training."
+            )
+            raise RuntimeError(f"Training diverged: {self._consecutive_nan_steps} consecutive NaN steps")
 
     def train(self):
         """Main training loop."""
@@ -615,7 +650,13 @@ class SEMTrainer:
                     self.optimizer.step()
                 self.optimizer.zero_grad()
                 self.scheduler.step()
+                # Trigger cosine decay when warmup completes
+                if self.global_step == self.config.training.warmup_steps:
+                    self.scheduler.begin_decay()
+                    logger.info(f"[SCHEDULER] Triggered cosine decay at step {self.global_step}")
                 t_optim_end = _sync_and_time(self.device.type)
+                # Reset NaN counter on successful step
+                self._consecutive_nan_steps = 0
 
                 current_phase = "ema_update"
                 t_ema_start = time.perf_counter()
@@ -699,6 +740,12 @@ class SEMTrainer:
                     "train/grad_norm": grad_norm,
                 }
             )
+
+            # V8 diagnostic logging
+            if hasattr(self.model, 'get_diagnostics'):
+                diag = self.model.get_diagnostics()
+                for k, v in diag.items():
+                    step_metrics[f'train/{k}'] = v
 
             # Console logging
             self.console_cb.on_step_end(

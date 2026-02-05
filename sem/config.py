@@ -13,6 +13,7 @@ class ModelConfig:
     num_layers: int = 8
     vocab_size: int = 32768
     max_seq_length: int = 2048
+    model_version: str = "v55"
 
 
 @dataclass
@@ -22,6 +23,9 @@ class EncoderConfig:
     sinkhorn_epsilon: float = 0.05
     sinkhorn_max_iter: int = 50
     sinkhorn_tol: float = 1e-3
+    soft_sparse: bool = True  # SEOP Fix 48: Enable gradient flow to all codebook entries
+    soft_sparse_temp: float = 0.1  # Temperature for soft-sparse softmax weighting
+    simple_mode: bool = False  # SEOP Fix 52: Bypass MESH-SDR, keep Re(z) in embedding space for weight tying
 
 
 @dataclass
@@ -68,6 +72,7 @@ class TrainingConfig:
     batch_size: int = 32
     learning_rate: float = 3e-4
     weight_decay: float = 0.01
+    encoder_lr_scale: float = 0.01  # SEOP Fix 41: Encoder LR = base_lr * this (balance gradient flow)
     warmup_steps: int = 2000  # Changed from 1000
     max_steps: int = 100000
     gradient_clip: float = 1.0
@@ -75,7 +80,7 @@ class TrainingConfig:
 
     # New fields
     micro_batch_size: int = 4
-    gradient_checkpointing: bool = True
+    gradient_checkpointing: bool = False  # Default disabled - causes tensor count mismatch bug
     unitary_lambda: float = 0.1
     low_vram_mode: bool = False
     born_chunk_size: int = 2048
@@ -110,6 +115,9 @@ class TrainingConfig:
     compile_mode: str = "default"
     no_amp: bool = False
 
+    # SEOP Fix 56: Label smoothing for noisy small-batch training
+    label_smoothing: float = 0.0
+
 
 @dataclass
 class CurriculumConfig:
@@ -141,6 +149,19 @@ class DistillationConfig:
 
 
 @dataclass
+class V8Config:
+    """V8.0 model-specific configuration."""
+    use_lindblad: bool = True
+    use_hybrid_automata: bool = True
+    use_quaternionic: bool = True
+    use_mhc: bool = False
+    lindblad_gamma: float = 0.01
+    num_lindblad_ops: int = 4
+    curvature_threshold: float = 0.1
+    condition_threshold: float = 100.0
+
+
+@dataclass
 class SEMConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
@@ -151,6 +172,7 @@ class SEMConfig:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     distillation: DistillationConfig = field(default_factory=DistillationConfig)
+    v8: V8Config = field(default_factory=V8Config)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SEMConfig":

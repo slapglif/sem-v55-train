@@ -5,6 +5,11 @@ from typing import Any, Dict, Optional
 import math
 
 from ..model import SEMModel
+try:
+    from ..model_v8 import SEMV8Model
+    HAS_V8 = True
+except ImportError:
+    HAS_V8 = False
 from ..utils.complex_adamw import ComplexAdamW
 from .scheduler import WSDScheduler
 from .distillation import EMATeacher, DistillationLoss
@@ -17,7 +22,10 @@ class SEMLightningModule(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
-        self.model = SEMModel(config)
+        if getattr(config.model, 'model_version', 'v55') == 'v8' and HAS_V8:
+            self.model = SEMV8Model(config)
+        else:
+            self.model = SEMModel(config)
 
         # SEOP Fix 27: Explicitly enable gradient checkpointing if configured
         if (
@@ -27,9 +35,6 @@ class SEMLightningModule(L.LightningModule):
             logger.info(
                 "Enabling gradient checkpointing on Mamba and Propagator layers"
             )
-            # We apply it to mamba_layers and propagator layers manually if needed,
-            # or just rely on the model's internal support if we add it.
-            # For now, let's use the old trainer's logic:
             from torch.utils.checkpoint import checkpoint
 
             # Monkey-patch forward methods for checkpointing
@@ -37,9 +42,33 @@ class SEMLightningModule(L.LightningModule):
                 original_forward = module.forward
 
                 def checkpointed_forward(*args, **kwargs):
-                    return checkpoint(
-                        original_forward, *args, use_reentrant=False, **kwargs
-                    )
+                    # CRITICAL: Disable caching during checkpointed forward to ensure
+                    # deterministic behavior (same tensors created in forward & recomputation)
+                    if hasattr(module, '_psi_cache'):
+                        old_cache = module._psi_cache
+                        module._psi_cache = None
+                        try:
+                            # use_reentrant=False is required for complex control flow
+                            # preserve_rng_state=False avoids device initialization errors
+                            result = checkpoint(
+                                original_forward,
+                                *args,
+                                use_reentrant=False,
+                                preserve_rng_state=False,
+                                **kwargs
+                            )
+                        finally:
+                            module._psi_cache = old_cache
+                        return result
+                    else:
+                        # For modules without cache (Mamba layers)
+                        return checkpoint(
+                            original_forward,
+                            *args,
+                            use_reentrant=False,
+                            preserve_rng_state=False,
+                            **kwargs
+                        )
 
                 module.forward = checkpointed_forward
 
@@ -47,6 +76,10 @@ class SEMLightningModule(L.LightningModule):
                 make_checkpointed(m)
             for m in self.model.propagator.layers:
                 make_checkpointed(m)
+        else:
+            logger.info(
+                "Gradient checkpointing DISABLED (config.training.gradient_checkpointing=False)"
+            )
 
         self.ema_teacher = None
         self.distillation_loss = None
@@ -60,6 +93,9 @@ class SEMLightningModule(L.LightningModule):
         return self.model(x, targets=targets, token_freqs=token_freqs)
 
     def training_step(self, batch, batch_idx):
+        # SEOP Fix 48: Propagator permanently disabled — CG solver non-convergence (residual 0.39 >> tol 2e-3)
+        # injects 14-19% norm corruption. Only 15.4K params (0.08% of model) — negligible capacity.
+
         token_ids, token_freqs = batch
         if getattr(self.config.training, "low_vram_mode", False):
             token_freqs = None
@@ -95,6 +131,12 @@ class SEMLightningModule(L.LightningModule):
         if "unitary_divergence" in output:
             self.log("train/unitary_div", output["unitary_divergence"], prog_bar=True)
 
+        # V8 diagnostic logging
+        if hasattr(self.model, 'get_diagnostics'):
+            diag = self.model.get_diagnostics()
+            for k, v in diag.items():
+                self.log(f'train/{k}', v, prog_bar=False)
+
         # Return dict so callbacks can access outputs["loss"]
         return {"loss": loss}
 
@@ -123,9 +165,33 @@ class SEMLightningModule(L.LightningModule):
                 logger.error(f"CRITICAL ERROR: NaN/Inf parameter {name}")
 
     def configure_optimizers(self):
+        # SEOP Fix 41: Per-layer LR scaling to balance gradient flow
+        # Encoder gradients are ~1000x larger than downstream layers
+        base_lr = self.config.training.learning_rate
+        encoder_lr_scale = getattr(self.config.training, 'encoder_lr_scale', 0.01)
+
+        # Separate parameter groups with different LRs
+        encoder_params = []
+        other_params = []
+
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                if name.startswith('encoder'):
+                    encoder_params.append(param)
+                else:
+                    other_params.append(param)
+
+        param_groups = [
+            {'params': encoder_params, 'lr': base_lr * encoder_lr_scale, 'name': 'encoder'},
+            {'params': other_params, 'lr': base_lr, 'name': 'other'},
+        ]
+
+        logger.info(f"SEOP Fix 41: Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}")
+        logger.info(f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}")
+
         optimizer = ComplexAdamW(
-            self.parameters(),
-            lr=self.config.training.learning_rate,
+            param_groups,
+            lr=base_lr,  # Default LR (overridden by param groups)
             weight_decay=self.config.training.weight_decay,
             temperature=1e-5,
         )

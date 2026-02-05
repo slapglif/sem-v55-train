@@ -42,32 +42,49 @@ class MESHEncoder(nn.Module):
         sinkhorn_tol: float = 1e-3,
         max_seq_length: int = 2048,
         low_vram_mode: bool = False,
+        soft_sparse: bool = False,
+        soft_sparse_temp: float = 0.1,
+        simple_mode: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.sdr_sparsity = sdr_sparsity
         self.sdr_candidates = sdr_candidates
         self.low_vram_mode = low_vram_mode
+        self.soft_sparse = soft_sparse
+        self.soft_sparse_temp = soft_sparse_temp
+        self.simple_mode = simple_mode
 
         # Token embedding (real-valued)
+        # SEOP Fix 52: Scale init to N(0, 1/√D) for weight tying compatibility.
+        # Default N(0,1) gives ||e||²≈D=128, so self-similarity logit≈128 → softmax≈1.0
+        # for current token. This traps the model in "repeat current token" local minimum.
+        # With 1/√D: ||e||²≈1, self-similarity≈1 → near-uniform initial predictions.
         self.embedding = nn.Embedding(vocab_size, hidden_dim)
+        nn.init.normal_(self.embedding.weight, std=1.0 / math.sqrt(hidden_dim))
 
-        # Cost matrix module
-        self.cost = LearnedCostMatrix(hidden_dim, sdr_candidates)
+        if simple_mode:
+            # SEOP Fix 52: Direct embedding → complex, bypassing Sinkhorn/SDR.
+            # Re(z) = embedding (stays in embedding space for weight tying).
+            # Im(z) = learned projection (additional capacity for phase dynamics).
+            self.imag_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+            nn.init.xavier_uniform_(self.imag_proj.weight, gain=0.3)  # SEOP Fix 56: Larger init for Im channel utilization
+        else:
+            # Cost matrix module
+            self.cost = LearnedCostMatrix(hidden_dim, sdr_candidates)
 
-        # Sinkhorn OT solver
-        self.sinkhorn = LogSinkhorn(
-            epsilon=sinkhorn_epsilon, max_iter=sinkhorn_max_iter, tol=sinkhorn_tol
-        )
+            # Sinkhorn OT solver
+            self.sinkhorn = LogSinkhorn(
+                epsilon=sinkhorn_epsilon, max_iter=sinkhorn_max_iter, tol=sinkhorn_tol
+            )
 
-        # Projection from SDR candidates back to hidden_dim
-        self.sdr_to_hidden = nn.Linear(sdr_candidates, hidden_dim)
+            # Projection from SDR candidates back to hidden_dim
+            self.sdr_to_hidden = nn.Linear(sdr_candidates, hidden_dim)
 
-        # Positional phase encoding for complex lift
-        # Phase = function of position, giving each position a unique complex signature
-        self.register_buffer(
-            "positional_phase", self._build_positional_phase(max_seq_length, hidden_dim)
-        )
+            # Positional phase encoding for complex lift
+            self.register_buffer(
+                "positional_phase", self._build_positional_phase(max_seq_length, hidden_dim)
+            )
 
     def _build_positional_phase(self, max_len: int, dim: int) -> Tensor:
         """Build positional phase angles for complex lift.
@@ -99,6 +116,13 @@ class MESHEncoder(nn.Module):
         # Step 1: Dense embedding
         x = self.embedding(token_ids)  # [B, S, D] float32
 
+        # SEOP Fix 52: Simple mode — Re(z) = embedding, Im(z) = learned projection
+        # Keeps Re in embedding space so weight-tied output projection works correctly.
+        # Mamba provides implicit positional encoding via sequential scan.
+        if self.simple_mode:
+            x_imag = self.imag_proj(x)
+            return safe_complex(x, x_imag)
+
         # Step 2: Compute cost matrix
         C = self.cost(x)  # [B, S, sdr_candidates]
 
@@ -119,19 +143,31 @@ class MESHEncoder(nn.Module):
         else:
             T = self.sinkhorn(C)  # [B, S, sdr_candidates]
 
-        # Step 4: SEOP Fix 15 — Soft-threshold sparsification
+        # Step 4: SEOP Fix 44 — Soft-sparse option preserves gradient flow
         # Hard top-k zeros 87.5% of dimensions, destroying Gaussian tail information.
         # Soft-threshold (shrinkage operator) preserves partial signal from near-threshold
         # components: sign(x)·max(|x|-τ, 0). τ adapts so ~k components survive per token.
         # This is the proximal operator of the L1 norm — optimal for sparse recovery.
+        #
+        # SEOP Fix 44: soft_sparse=True uses temperature-scaled softmax instead:
+        # T_weights = softmax(|T| / τ) keeps all dimensions active with varying weight.
+        # This prevents zero gradients and preserves Gaussian tail information.
         T_abs = T.abs()
-        topk_vals, topk_idx = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
-        tau = topk_vals[..., -1:]
-        T_sparse = torch.sign(T) * torch.relu(T_abs - tau)
-        fallback = T_sparse.abs().sum(dim=-1, keepdim=True) <= 1e-12
-        if fallback.any():
-            mask = torch.zeros_like(T_abs).scatter(-1, topk_idx, 1.0)
-            T_sparse = torch.where(fallback, T * mask, T_sparse)
+
+        if self.soft_sparse:
+            # Soft-sparse: temperature-scaled attention weighting (all dims active)
+            T_weights = torch.softmax(T_abs / self.soft_sparse_temp, dim=-1)
+            T_sparse = T * T_weights
+        else:
+            # Hard sparse: original top-k sparsification
+            topk_vals, topk_idx = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
+            tau = topk_vals[..., -1:]
+            T_sparse = torch.sign(T) * torch.relu(T_abs - tau)
+            fallback = T_sparse.abs().sum(dim=-1, keepdim=True) <= 1e-12
+            if fallback.any():
+                mask = torch.zeros_like(T_abs).scatter(-1, topk_idx, 1.0)
+                T_sparse = torch.where(fallback, T * mask, T_sparse)
+
         self._last_sdr_sparse = T_sparse.detach()
 
         # Step 5: Project sparse transport plan to hidden dim

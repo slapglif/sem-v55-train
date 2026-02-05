@@ -11,7 +11,7 @@ from torch import Tensor
 
 
 def safe_complex(real: Tensor, imag: Tensor) -> Tensor:
-    if real.dtype == torch.bfloat16:
+    if real.dtype != imag.dtype or real.dtype == torch.bfloat16:
         real = real.float()
         imag = imag.float()
     return torch.complex(real, imag)

@@ -1,14 +1,14 @@
-# SEOP Fix 58: GPU Saturation - increase batch size to utilize GPU
-# GPU was at 14% with batch=4. Increasing to 16 should give 4-8x speedup.
-# LR scaled: sqrt(16/4) * 5e-3 = 1e-2
+# SEM V8.0 Test Configuration
+# Based on test.yaml with V8.0 model dispatch and feature flags
 model:
-  hidden_dim: 128           # Proven to work (achieved 4.70)
+  model_version: "v8"
+  hidden_dim: 128
   num_layers: 8
-  vocab_size: 50262         # GPT-2 (50257) + 5 special tokens
+  vocab_size: 50262
   max_seq_length: 256
 
 encoder:
-  simple_mode: true         # SEOP Fix 52: Direct embedding → complex
+  simple_mode: true
   sdr_sparsity: 16
   sdr_candidates: 128
   sinkhorn_epsilon: 0.05
@@ -46,29 +46,28 @@ sampler:
   top_p: 0.95
 
 training:
-  # SEOP Fix 58: GPU Saturation settings (batch=8, 16 OOM'd)
-  batch_size: 8              # 2x more work per step (was 4)
+  batch_size: 8
   micro_batch_size: 8
   gradient_checkpointing: false
   dtype: float32
-  learning_rate: 7.0e-3      # Scaled: sqrt(8/4) * 5e-3 = 7e-3
+  learning_rate: 5.0e-3
   no_amp: true
   encoder_lr_scale: 1.0
   weight_decay: 0.01
-  warmup_steps: 100
-  max_steps: 12500           # Same total tokens: 25000*4 / 8 = 12500
-  gradient_clip: 3.0
+  warmup_steps: 50
+  max_steps: 12500
+  gradient_clip: 5.0
   unitary_lambda: 0.0
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 4             # Parallel data loading (was 0)
+  num_workers: 8
   shuffle_buffer_size: 10000
   scheduler_type: "cosine"
   stable_steps: 0
-  decay_steps: 25000
+  decay_steps: 12500
   lr_min_ratio: 0.1
   label_smoothing: 0.0
-  log_interval: 20
+  log_interval: 5
   health_check_interval: 50
   checkpoint_interval: 2000
   keep_checkpoints: 3
@@ -81,3 +80,13 @@ curriculum:
 
 distillation:
   enabled: false
+
+v8:
+  use_lindblad: false
+  use_hybrid_automata: false
+  use_quaternionic: false
+  use_mhc: false
+  lindblad_gamma: 0.01
+  num_lindblad_ops: 4
+  curvature_threshold: 0.1
+  condition_threshold: 100.0

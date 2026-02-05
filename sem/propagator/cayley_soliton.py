@@ -114,7 +114,10 @@ class CayleySolitonPropagator(nn.Module):
             cos_p = torch.cos(phase_shift)
             sin_p = torch.sin(phase_shift)
             psi_rot_r, psi_rot_i = complex_mul_real(psi_r, psi_i, cos_p, sin_p)
-            envelope = torch.cosh(intensity)
+            # SEOP Fix 42: Bounded rational envelope instead of catastrophic cosh()
+            # cosh(10) = 11013 destroys signal. Rational: max attenuation ~10x not 11000x
+            # f(x) = 1 + α·x² keeps gradients flowing through high-intensity regions
+            envelope = 1.0 + 0.1 * intensity * intensity  # Bounded: f(10)=11, not 11013
             psi_rot_r = psi_rot_r / envelope
             psi_rot_i = psi_rot_i / envelope
             norm_in = (psi_r * psi_r + psi_i * psi_i).sum(dim=-1, keepdim=True)
@@ -161,7 +164,11 @@ class CayleySolitonPropagator(nn.Module):
                 I = torch.eye(D, dtype=H.dtype, device=H.device)
                 A_plus = I + 1j * half_dt * H
                 rhs = torch.complex(rhs_r, rhs_i)
-                psi_out = torch.linalg.solve(A_plus, rhs)
+                # Reshape for batch processing: [B, S, D] -> [B*S, D]
+                B, S, _ = rhs.shape
+                rhs_flat = rhs.reshape(B * S, D)
+                psi_out_flat = torch.linalg.solve(A_plus, rhs_flat.T).T
+                psi_out = psi_out_flat.reshape(B, S, D)
                 self._psi_cache = psi_out.detach().clone()
 
                 self.hamiltonian.clear_cache()

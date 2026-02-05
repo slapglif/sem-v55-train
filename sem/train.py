@@ -82,16 +82,15 @@ def apply_max_aggression(config: SEMConfig, device_type: str):
 
     # VRAM Tuning (8GB)
     if device_type in ["cuda", "xpu"]:
-        # For a ~100M param model, 16 is aggressive but usually fits in 8GB with gradient checkpointing
+        # For a ~100M param model, 16 is aggressive but usually fits in 8GB
         config.training.micro_batch_size = 16
         # Target a large effective batch size for stability
         config.training.batch_size = 256
-        config.training.gradient_checkpointing = True
+        # NOTE: gradient_checkpointing disabled by default (causes tensor count mismatch bug)
     else:
         # CPU only "Aggression"
         config.training.micro_batch_size = 8
         config.training.batch_size = 64
-        config.training.gradient_checkpointing = True
 
     logger.info(f"  -> micro_batch_size: {config.training.micro_batch_size}")
     logger.info(f"  -> batch_size: {config.training.batch_size}")

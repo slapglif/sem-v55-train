@@ -73,14 +73,28 @@ class ComplexSSMState(nn.Module):
 
         # A matrix: diagonal, complex, in log-polar form
         # log_magnitude and angle are learnable
-        # Raw A magnitude parameter (passed through -softplus for guaranteed stability)
-        # After -softplus: effective log_A_mag in [-1.31, -0.47] → |A| in [0.27, 0.63]
+        # SEOP Fix 47: First-principles optimal memory horizon
+        #
+        # DERIVATION: For sequence length S, optimal memory window τ = S/e ≈ S/2.718
+        # This balances recency bias with long-range dependence (max mutual information).
+        #
+        # For S=256: τ_opt = 256/e ≈ 94 tokens
+        # |A| = exp(-1/τ) = exp(-1/94) = 0.9894
+        # -softplus(x) = log(|A|) = -0.0106
+        # softplus(x) = 0.0106 → x = log(exp(0.0106)-1) ≈ -4.55
+        #
+        # Initialize with small variance around optimal:
         self.log_A_mag = nn.Parameter(
-            torch.rand(mimo_groups, state_dim) * 0.5
-            + 0.5  # softplus(0.5..1.0) → -[0.97, 1.31]
+            torch.rand(mimo_groups, state_dim) * 0.1 - 4.55  # softplus(-4.55..-4.45) ≈ 0.0106
         )
+        # SEOP Fix 53: Zero-init phase to prevent gradient cancellation.
+        # Random phase causes A^n = |A|^n * exp(i*n*θ) to destructively interfere
+        # across state dimensions in the backward pass, reducing gradient magnitude
+        # from O(N) to O(√N). Zero phase makes the recurrence pure-real at init
+        # (like standard Mamba/S4), allowing coherent gradient flow. The model
+        # learns useful rotation frequencies during training.
         self.A_phase = nn.Parameter(
-            torch.randn(mimo_groups, state_dim) * 0.1  # Small initial phase
+            torch.zeros(mimo_groups, state_dim)
         )
 
         # B projection: input -> state (complex linear, fused)
@@ -275,17 +289,18 @@ class ComplexMamba3Layer(nn.Module):
         # maximizing gradient information. Initialize β=exp(0)=1 for unit-variance match.
         self.activation_threshold = nn.Parameter(torch.tensor(0.0))
 
-        # SEOP Fix 17: Per-dimension SSM output scaling
-        # Scalar scale applies uniform compensation, but different state dimensions
-        # decay at different rates (|A|^S varies per dim). Per-dimension scaling lets
-        # each channel learn its own attenuation compensation.
-        self.ssm_output_scale = nn.Parameter(torch.full((hidden_dim,), 2.5))
+        # SEOP Fix 17+52: Per-dimension SSM output scaling
+        # Init to 1.0 (not 2.5) — with scaled embedding init (Fix 52), the SSM output
+        # magnitude is already well-matched. 2.5x amplification adds excessive noise
+        # relative to the smaller embedding signal.
+        self.ssm_output_scale = nn.Parameter(torch.ones(hidden_dim))
 
-        # SEOP Fix 22: Learnable residual scaling initialized to 1/√(2L)
+        # SEOP Fix 22+53: Learnable residual scaling initialized to 1/√L
         # Without scaling, variance grows as 1 + L·σ² across L layers.
-        # DeepSeek/GPT-2 style: scale residual additions to maintain unit variance.
+        # DeepSeek/GPT-2 uses 1/√(2L) for transformer (2 branches: attn+FFN).
+        # Mamba has 1 branch per layer, so correct scaling is 1/√L.
         self.residual_scale = nn.Parameter(
-            torch.tensor(1.0 / math.sqrt(2.0 * num_layers))
+            torch.tensor(1.0 / math.sqrt(num_layers))
         )
 
     def forward(self, x: Tensor) -> Tensor:

@@ -96,15 +96,16 @@ class HealthMonitor:
             # Run probe forward pass capturing intermediates
             psi_encoder = model.encoder(sample_input)
 
-            # SDR sparsity
-            sdr_sparse = getattr(model.encoder, "_last_sdr_sparse", None)
-            sdr_source = sdr_sparse if sdr_sparse is not None else psi_encoder
-            report.sdr_sparsity = sparsity_ratio(sdr_source).item()
-            if report.sdr_sparsity < 0.5:
-                report.has_error = True
-                report.messages.append(
-                    f"SDR sparsity collapsed: {report.sdr_sparsity:.3f} < 0.5"
-                )
+            # SDR sparsity (skip in simple_mode — no SDR exists)
+            if not getattr(model.encoder, "simple_mode", False):
+                sdr_sparse = getattr(model.encoder, "_last_sdr_sparse", None)
+                sdr_source = sdr_sparse if sdr_sparse is not None else psi_encoder
+                report.sdr_sparsity = sparsity_ratio(sdr_source).item()
+                if report.sdr_sparsity < 0.5:
+                    report.has_error = True
+                    report.messages.append(
+                        f"SDR sparsity collapsed: {report.sdr_sparsity:.3f} < 0.5"
+                    )
 
             # Information density after encoder
             report.info_density = information_density(psi_encoder).item()
@@ -127,37 +128,37 @@ class HealthMonitor:
                     f"Phase collapse detected: coherence={report.phase_coherence_val:.4f}"
                 )
 
-            # Unitarity through propagator
-            psi_before_prop = psi.clone()
-            psi_after_prop = model.propagator(psi)
-            report.unitarity_dev = unitarity_deviation(
-                psi_before_prop, psi_after_prop
-            ).item()
+            # Unitarity through propagator (skip if propagator is disabled)
+            if getattr(model, 'propagator_enabled', True):
+                psi_before_prop = psi.clone()
+                psi_after_prop = model.propagator(psi)
+                report.unitarity_dev = unitarity_deviation(
+                    psi_before_prop, psi_after_prop
+                ).item()
 
-            if report.unitarity_dev > self.unitarity_error:
-                report.has_error = True
-                report.messages.append(
-                    f"Unitarity ERROR: deviation={report.unitarity_dev:.2e}"
-                )
-            elif report.unitarity_dev > self.unitarity_warn:
-                report.has_warning = True
-                report.messages.append(
-                    f"Unitarity warning: deviation={report.unitarity_dev:.2e}"
-                )
+                if report.unitarity_dev > self.unitarity_error:
+                    report.has_error = True
+                    report.messages.append(
+                        f"Unitarity ERROR: deviation={report.unitarity_dev:.2e}"
+                    )
+                elif report.unitarity_dev > self.unitarity_warn:
+                    report.has_warning = True
+                    report.messages.append(
+                        f"Unitarity warning: deviation={report.unitarity_dev:.2e}"
+                    )
 
-            # CG residual (post-hoc check on propagator output)
-            # Check ||A @ x - b|| / ||b|| for the last Cayley layer
-            report.cg_residual = self._check_cg_residual(model, psi_before_prop)
-            if report.cg_residual > self.cg_residual_error:
-                report.has_error = True
-                report.messages.append(
-                    f"CG convergence ERROR: residual={report.cg_residual:.2e}"
-                )
-            elif report.cg_residual > self.cg_residual_warn:
-                report.has_warning = True
-                report.messages.append(
-                    f"CG convergence warning: residual={report.cg_residual:.2e}"
-                )
+                # CG residual (post-hoc check on propagator output)
+                report.cg_residual = self._check_cg_residual(model, psi_before_prop)
+                if report.cg_residual > self.cg_residual_error:
+                    report.has_error = True
+                    report.messages.append(
+                        f"CG convergence ERROR: residual={report.cg_residual:.2e}"
+                    )
+                elif report.cg_residual > self.cg_residual_warn:
+                    report.has_warning = True
+                    report.messages.append(
+                        f"CG convergence warning: residual={report.cg_residual:.2e}"
+                    )
 
             # CG skip rate from lazy CG optimization
             if hasattr(model, "propagator") and hasattr(
