@@ -61,6 +61,7 @@ class ComplexMamba3LayerV8(nn.Module):
         max_seq_length: int = 2048,
         # V8.0 additions
         use_mhc: bool = True,
+        mhc_streams: int = 4,
         mhc_num_iters: int = 10,
         mhc_tau: float = 0.05,
         use_lindblad: bool = True,
@@ -114,25 +115,16 @@ class ComplexMamba3LayerV8(nn.Module):
 
         # V8.0: mHC residual (replaces standard residual)
         if self.use_mhc:
-            # For S=1, Sinkhorn is trivially [[1.0]] — use non-learnable buffers.
-            # For S>1, use nn.Parameter for actual stream mixing.
-            # NOTE: mhc_streams=1 makes mHC a pass-through (residual only).
-            # Sinkhorn on a 1x1 matrix is trivially [[1.0]], so the mHC branch
-            # degenerates to: out = x + scale * f(x).  To enable actual
-            # multi-stream mixing, set mhc_streams > 1 and use SimpleMHC.
-            # Currently S=1 to prevent gradient explosion from atan2 singularity
-            # in Sinkhorn at the origin (see commit 0bc5e93).
-            mhc_streams = 1
-            if mhc_streams == 1:
-                self.register_buffer("H_res_logits", torch.zeros(1, 1))
-                self.register_buffer("H_res_logits_imag", torch.zeros(1, 1))
-            else:
-                self.H_res_logits = nn.Parameter(torch.zeros(mhc_streams, mhc_streams))
-                self.H_res_logits_imag = nn.Parameter(
-                    torch.zeros(mhc_streams, mhc_streams)
-                )
-            self.mhc_num_iters = mhc_num_iters
-            self.mhc_tau = mhc_tau
+            from sem.hyper_connections.mhc import SimpleMHC
+
+            self.mhc = SimpleMHC(
+                dim=hidden_dim,
+                num_streams=mhc_streams,
+                mhc_num_iters=mhc_num_iters,
+                mhc_tau=mhc_tau,
+                complex_mode=True,
+                dropout=0.0,
+            )
 
         # V8.0: Lindblad dissipation
         if use_lindblad:
@@ -227,14 +219,7 @@ class ComplexMamba3LayerV8(nn.Module):
         branch_out = branch_out * scale
 
         if self.use_mhc:
-            out = mhc_residual(
-                residual,
-                branch_out,
-                self.H_res_logits,
-                H_res_logits_imag=self.H_res_logits_imag,
-                mhc_num_iters=self.mhc_num_iters,
-                mhc_tau=self.mhc_tau,
-            )
+            out = self.mhc(residual, branch_out)
         else:
             out = residual + branch_out
 
@@ -322,6 +307,9 @@ class SEMModel(nn.Module):
                         max_seq_length=c.model.max_seq_length,
                         # V8.0 config
                         use_mhc=use_mhc,
+                        mhc_streams=getattr(v8, "mhc_streams", 4),
+                        mhc_num_iters=getattr(v8, "mhc_num_iters", 10),
+                        mhc_tau=getattr(v8, "mhc_tau", 0.05),
                         use_lindblad=use_lindblad,
                         lindblad_gamma=getattr(v8, "lindblad_gamma", 0.01),
                         num_lindblad_ops=getattr(v8, "num_lindblad_ops", 4),

@@ -183,6 +183,9 @@ class V8Config:
     use_hybrid_automata: bool = True
     use_quaternionic: bool = True
     use_mhc: bool = True
+    mhc_streams: int = 4
+    mhc_num_iters: int = 10
+    mhc_tau: float = 0.05
     lindblad_gamma: float = 0.01
     num_lindblad_ops: int = 4
     curvature_threshold: float = 0.1

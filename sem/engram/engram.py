@@ -1,19 +1,17 @@
 """Engram - N-gram hash-based embedding augmentation module.
 
 Augments hidden states with n-gram context via hash-based embeddings.
-Uses gated mixing to selectively incorporate n-gram information.
+Uses conv-gated mixing to selectively incorporate n-gram information.
 
 Architecture:
 1. Generate n-gram hash IDs from input tokens
 2. Lookup multi-head embeddings for each hash
 3. Flatten embeddings across n-gram sizes and heads
-4. Gate mixing: hidden_state ⊙ sigmoid(query · key)
-5. Add short convolution for local smoothing
+4. Conv-gated mixing: learned per-channel gates + short convolution
 """
 
 from dataclasses import dataclass, field
 from typing import Any, Optional
-import math
 
 import torch
 import torch.nn as nn
@@ -153,7 +151,7 @@ class Engram(nn.Module):
 
     Augments hidden states with n-gram context via:
     1. N-gram hash embeddings (multi-head, multi-layer)
-    2. Gated mixing based on query-key attention
+    2. Conv-gated mixing (learned per-channel scalar gates)
     3. Short convolution for local smoothing
 
     Attributes:
@@ -163,10 +161,8 @@ class Engram(nn.Module):
         hash_mapping: N-gram hash mapping generator
         multi_head_embedding: Multi-head embedding lookup
         short_conv: Short convolution module
-        value_proj: Linear projection for value embeddings
-        key_projs: Linear projections for keys (one per channel)
-        norm1: RMSNorm for keys
-        norm2: RMSNorm for queries
+        value_proj: Linear projection for n-gram embeddings
+        gate_logits: Learned per-channel scalar gates (logits)
     """
 
     def __init__(
@@ -226,20 +222,10 @@ class Engram(nn.Module):
         # Projection layers
         engram_hidden_size = (config.max_ngram_size - 1) * config.n_embed_per_ngram
         self.value_proj = nn.Linear(engram_hidden_size, hidden_size)
-        self.key_projs = nn.ModuleList([
-            nn.Linear(engram_hidden_size, hidden_size)
-            for _ in range(config.hc_mult)
-        ])
 
-        # Normalization layers
-        self.norm1 = nn.ModuleList([
-            nn.RMSNorm(hidden_size)
-            for _ in range(config.hc_mult)
-        ])
-        self.norm2 = nn.ModuleList([
-            nn.RMSNorm(hidden_size)
-            for _ in range(config.hc_mult)
-        ])
+        # Learned per-channel gates (replaces similarity-based gating)
+        # Initialize at 0.0 so sigmoid gives 0.5 (moderate mixing)
+        self.gate_logits = nn.Parameter(torch.zeros(config.hc_mult))
 
     def forward(self, hidden_states: Tensor, input_ids: Tensor) -> Tensor:
         """Apply Engram augmentation to hidden states.
@@ -264,41 +250,19 @@ class Engram(nn.Module):
         # -> flatten to [B, L, engram_hidden_size]
         embeddings = self.multi_head_embedding(hash_input_ids).flatten(start_dim=-2)
 
-        # Handle case where hidden_states is 3D (no hc_mult dimension)
-        if hidden_states.dim() == 3:
-            # Expand to [B, L, hc_mult, D]
-            hidden_states_expanded = hidden_states.unsqueeze(2).expand(-1, -1, self.hc_mult, -1)
-        else:
-            hidden_states_expanded = hidden_states
+        # Project n-gram embeddings to hidden size
+        value = self.value_proj(embeddings)  # [B, L, D]
 
-        # Compute gated mixing for each channel
-        gates = []
-        for hc_idx in range(self.hc_mult):
-            # Key from n-gram embeddings
-            key = self.key_projs[hc_idx](embeddings)  # [B, L, D]
-            normed_key = self.norm1[hc_idx](key)
+        # Expand to hc_mult channels with learned gates
+        # gate_logits: [hc_mult] learned parameters, sigmoid gives (0,1) range
+        gates = torch.sigmoid(self.gate_logits)  # [hc_mult]
 
-            # Query from hidden states
-            query = hidden_states_expanded[:, :, hc_idx, :]  # [B, L, D]
-            normed_query = self.norm2[hc_idx](query)
+        # Expand value to [B, L, hc_mult, D] and apply gates
+        value_expanded = value.unsqueeze(2).expand(-1, -1, self.hc_mult, -1)  # [B, L, hc_mult, D]
+        gated_value = value_expanded * gates.view(1, 1, self.hc_mult, 1)  # [B, L, hc_mult, D]
 
-            # Gate = sigmoid(softplus(|query · key|) * sign(query · key))
-            # This provides smooth gating with sign preservation
-            gate = (normed_key * normed_query).sum(dim=-1) / math.sqrt(self.hidden_size)
-            gate = gate.abs().clamp_min(1e-6).sqrt() * gate.sign()
-            gate = gate.sigmoid().unsqueeze(-1)  # [B, L, 1]
+        # Short convolution for local smoothing
+        output = gated_value + self.short_conv(gated_value)  # [B, L, hc_mult, D]
 
-            gates.append(gate)
-
-        # Stack gates: [B, L, hc_mult, 1]
-        gates = torch.stack(gates, dim=2)
-
-        # Gated value projection: value * gate
-        # value: [B, L, 1, D] -> broadcast to [B, L, hc_mult, D]
-        value = gates * self.value_proj(embeddings).unsqueeze(2)  # [B, L, hc_mult, D]
-
-        # Add short convolution
-        output = value + self.short_conv(value)  # [B, L, hc_mult, D]
-
-        # Reduce hc_mult dimension by summing
+        # Reduce hc_mult dimension
         return output.sum(dim=2)  # [B, L, D]
