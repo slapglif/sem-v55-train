@@ -179,7 +179,7 @@ def main():
             model = torch.compile(model, mode="reduce-overhead")
             logger.info("torch.compile enabled (reduce-overhead)")
         except Exception as e:
-            logger.warning(f"torch.compile failed: {e}")
+            logger.warning(f"torch.compile failed, falling back to eager: {e}")
     elif args.no_compile:
         logger.info("torch.compile disabled (--no-compile)")
 
