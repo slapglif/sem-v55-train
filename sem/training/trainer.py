@@ -471,6 +471,12 @@ class SEMTrainer:
         """Main training loop."""
         c = self.config.training
 
+        if c.batch_size % c.micro_batch_size != 0:
+            raise ValueError(
+                f"batch_size ({c.batch_size}) must be divisible by "
+                f"micro_batch_size ({c.micro_batch_size})"
+            )
+
         accum_steps = c.batch_size // c.micro_batch_size
         logger.info(f"SEM V5.5 'Lean Crystal' Training")
         logger.info(f"Device: {self.device}")

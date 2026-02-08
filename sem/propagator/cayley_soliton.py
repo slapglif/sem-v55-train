@@ -142,7 +142,9 @@ class CayleySolitonPropagator(nn.Module):
             # SEOP Fix 42: Bounded rational envelope instead of catastrophic cosh()
             # cosh(10) = 11013 destroys signal. Rational: max attenuation ~10x not 11000x
             # f(x) = 1 + α·x² keeps gradients flowing through high-intensity regions
-            envelope = 1.0 + 0.1 * intensity * intensity  # Bounded: f(10)=11, not 11013
+            # SEOP Fix 9: Per-dimension Kerr coefficient modulates envelope strength
+            alpha = torch.abs(self.alpha)  # Ensure non-negative coupling
+            envelope = 1.0 + alpha * intensity * intensity  # Bounded rational envelope
             psi_rot_r = psi_rot_r / envelope
             psi_rot_i = psi_rot_i / envelope
             norm_in = (psi_r * psi_r + psi_i * psi_i).sum(dim=-1, keepdim=True)

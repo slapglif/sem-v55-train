@@ -116,6 +116,12 @@ class ComplexMamba3LayerV8(nn.Module):
         if self.use_mhc:
             # For S=1, Sinkhorn is trivially [[1.0]] — use non-learnable buffers.
             # For S>1, use nn.Parameter for actual stream mixing.
+            # NOTE: mhc_streams=1 makes mHC a pass-through (residual only).
+            # Sinkhorn on a 1x1 matrix is trivially [[1.0]], so the mHC branch
+            # degenerates to: out = x + scale * f(x).  To enable actual
+            # multi-stream mixing, set mhc_streams > 1 and use SimpleMHC.
+            # Currently S=1 to prevent gradient explosion from atan2 singularity
+            # in Sinkhorn at the origin (see commit 0bc5e93).
             mhc_streams = 1
             if mhc_streams == 1:
                 self.register_buffer("H_res_logits", torch.zeros(1, 1))
@@ -197,7 +203,7 @@ class ComplexMamba3LayerV8(nn.Module):
 
         # Extract branch = f(x) from base_layer output (residual + scale * f(x))
         scale = self.base_layer.residual_scale
-        branch_out = (out - residual) / max(scale, 1e-8)
+        branch_out = (out - residual) / scale.clamp(min=1e-8)
 
         if self.use_lindblad:
             branch_out = self.lindblad(branch_out)

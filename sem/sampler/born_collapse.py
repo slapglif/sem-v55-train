@@ -90,9 +90,12 @@ class BornCollapseSampler(nn.Module):
         p = p if p is not None else self.top_p
         if p >= 1.0:
             return logits
+        p = max(p, 1e-6)  # Guard: p<=0 would mask ALL tokens → NaN
         sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
         sorted_mask = (cumulative_probs - F.softmax(sorted_logits, dim=-1)) >= p
+        # Always keep at least the top-1 token to prevent all-masked → NaN
+        sorted_mask[..., 0] = False
         sorted_logits[sorted_mask] = float("-inf")
         logits = logits.scatter(-1, sorted_indices, sorted_logits)
         return logits
@@ -133,9 +136,9 @@ class BornCollapseSampler(nn.Module):
             filtered_logits = self.apply_top_k(scaled_logits, top_k)
             filtered_logits = self.apply_top_p(filtered_logits, top_p)
             probs = F.softmax(filtered_logits, dim=-1)
-            tokens = torch.multinomial(
-                probs.reshape(-1, probs.shape[-1]), 1
-            ).reshape(probs.shape[:-1])
+            tokens = torch.multinomial(probs.reshape(-1, probs.shape[-1]), 1).reshape(
+                probs.shape[:-1]
+            )
             result["tokens"] = tokens
             result["probs"] = probs
 

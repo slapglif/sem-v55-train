@@ -94,8 +94,10 @@ class ComplexSSMState(nn.Module):
             tau = max_seq_length / math.e
         inv_tau = 1.0 / max(tau, 1.0)
         log_a_init = math.log(math.exp(inv_tau) - 1.0) if inv_tau < 10.0 else inv_tau
+        # Use +log_a_init so raw values are negative at init:
+        # softplus(negative) ≈ small positive ≈ 1/τ, giving A_mag = exp(-softplus(.)) ≈ exp(-1/τ) (long memory).
         self.log_A_mag = nn.Parameter(
-            torch.rand(mimo_groups, state_dim) * 0.1 - log_a_init
+            torch.rand(mimo_groups, state_dim) * 0.1 + log_a_init
         )
         # SEOP: Small random init for rotational diversity.
         # Zero phase collapses all state dims to pure-real at init, preventing

@@ -185,6 +185,11 @@ class MESHEncoder(nn.Module):
         # Instead of polar(|sdr|, phase) which destroys sign (1 bit/dim lost),
         # multiply real sdr by complex positional phasor: z = sdr * exp(i*phase)
         # This preserves the sign as a π phase flip — zero information loss.
+        if S > self.positional_phase.shape[0]:
+            raise ValueError(
+                f"Sequence length {S} exceeds max_seq_length "
+                f"{self.positional_phase.shape[0]}. Increase model.max_seq_length in config."
+            )
         phase = self.positional_phase[:S, :]
         cos = torch.cos(phase).unsqueeze(0)
         sin = torch.sin(phase).unsqueeze(0)

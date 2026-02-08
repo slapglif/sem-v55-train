@@ -131,7 +131,14 @@ class SEMLightningModule(L.LightningModule):
         if hasattr(self.model, "get_diagnostics"):
             diag = self.model.get_diagnostics()
             for k, v in diag.items():
-                self.log(f"train/{k}", v, prog_bar=False)
+                if isinstance(v, (list, tuple)):
+                    if len(v) > 0:
+                        self.log(f"train/{k}_mean", sum(v) / len(v), prog_bar=False)
+                        self.log(f"train/{k}_len", float(len(v)), prog_bar=False)
+                elif isinstance(v, (int, float)):
+                    self.log(f"train/{k}", float(v), prog_bar=False)
+                elif isinstance(v, torch.Tensor) and v.numel() == 1:
+                    self.log(f"train/{k}", v.item(), prog_bar=False)
 
         # Return dict so callbacks can access outputs["loss"]
         return {"loss": loss}
