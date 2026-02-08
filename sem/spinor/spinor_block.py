@@ -1,16 +1,16 @@
-"""Block-diagonal spinor factorization with Real-Block Isomorphism.
+"""Block-diagonal complex transform with Real-Block Isomorphism.
 
-Implements the spinor representation as block-diagonal complex matrices.
-Instead of a dense D×D complex matrix (O(D^2)), we use num_blocks
-independent block_size×block_size matrices (O(num_blocks * block_size^2)).
+Implements a block-diagonal *complex linear* map using num_blocks independent
+block_size×block_size complex matrices.
 
-For D=256, block_size=8, num_blocks=32:
-- Dense: 256^2 = 65,536 complex multiplies
-- Block-diagonal: 32 * 8^2 = 2,048 complex multiplies
-- Speedup: 32x (theoretical), ~100x with memory access patterns
+This factorization is a computational/memory tradeoff:
+- Dense D×D complex matmul is O(D^2)
+- Block-diagonal is O(num_blocks * block_size^2)
 
-The blocks maintain non-commutative geometric (spinor) properties
-because each block acts as an independent SU(block_size) rotation.
+Important: the blocks are not constrained to be unitary (or SU(n)) during
+training. If you want the per-block matrix U to be close to unitary, use the
+provided unitarity regularizer (SpinorBlock.unitarity_loss) and/or an external
+projection step in the training loop.
 
 [MISMATCH] Previous version stored weights as complex64 nn.Parameter,
 breaking torch.compile (inductor can't codegen complex ops) and
@@ -24,7 +24,6 @@ The block_diagonal_complex_matmul already accepts .real/.imag decomposition.
 
 import torch
 import torch.nn as nn
-import math
 from torch import Tensor
 
 from sem.utils.complex_ops import safe_complex
@@ -33,10 +32,15 @@ from sem.utils.complex_ops import safe_complex
 
 
 class SpinorBlock(nn.Module):
-    """Block-diagonal spinor transformation layer.
+    """Block-diagonal complex transformation layer.
 
     Factorizes a D×D complex transform into num_blocks independent
-    block_size×block_size complex rotations, stored as float32 pairs.
+    block_size×block_size complex matrices, stored as float32 (real, imag)
+    parameter pairs.
+
+    Note: this parameterization is *not* unitary by construction. Use
+    `unitarity_loss()` as a regularizer if you want to bias the blocks toward
+    unitarity.
     """
 
     def __init__(self, hidden_dim: int, block_size: int = 8):
@@ -58,26 +62,34 @@ class SpinorBlock(nn.Module):
             weight_real[b] = (
                 torch.eye(block_size) + torch.randn(block_size, block_size) * 0.02
             )
-            # Antisymmetric imaginary part for near-unitary initialization
+            # Antisymmetric imaginary part is a heuristic for a near-identity
+            # complex transform. It does not guarantee (or preserve) unitarity.
             skew = torch.randn(block_size, block_size) * 0.02
             weight_imag[b] = skew - skew.T
 
         self.weight_real = nn.Parameter(weight_real)
         self.weight_imag = nn.Parameter(weight_imag)
 
-        # Tag for ComplexAdamW coupled momentum
-        self.weight_real._is_complex_real = True  # type: ignore[attr-defined]
-        self.weight_imag._is_complex_imag = True  # type: ignore[attr-defined]
-        self.weight_real._complex_partner = self.weight_imag  # type: ignore[attr-defined]
-        self.weight_imag._complex_partner = self.weight_real  # type: ignore[attr-defined]
+        # Tag for ComplexAdamW coupled momentum.
+        # Use setattr to keep type checkers happy.
+        setattr(self.weight_real, "_is_complex_real", True)
+        setattr(self.weight_imag, "_is_complex_imag", True)
+        setattr(self.weight_real, "_complex_partner", self.weight_imag)
+        setattr(self.weight_imag, "_complex_partner", self.weight_real)
 
     def forward(self, x: Tensor) -> Tensor:
-        """Apply block-diagonal spinor rotation.
+        """Apply block-diagonal complex transform.
 
         Args:
             x: [B, S, D] complex64
         Returns:
             [B, S, D] complex64
+
+        Note:
+            This forward pass does not enforce unitarity. If strict unitarity is
+            desired, consider adding `unitarity_loss()` to your training loss and
+            optionally projecting each block matrix to the nearest unitary (e.g.
+            via polar/QR) occasionally in the training loop.
         """
         B, S, D = x.shape
 
@@ -90,6 +102,11 @@ class SpinorBlock(nn.Module):
 
         # Block-diagonal complex matmul via Real-Block Isomorphism
         # (br + i·bi) @ (xr + i·xi) = (br@xr - bi@xi) + i·(br@xi + bi@xr)
+        #
+        # We keep the standard 4-einsum decomposition. While one can sometimes
+        # restructure this into fewer calls by stacking real/imag parts, in
+        # practice it typically does not reduce FLOPs and can regress kernel
+        # selection or memory traffic depending on backend.
         out_real = torch.einsum("noi,bsni->bsno", br, xr) - torch.einsum(
             "noi,bsni->bsno", bi, xi
         )
@@ -102,12 +119,35 @@ class SpinorBlock(nn.Module):
         # Reshape back: [B, S, D]
         return out.reshape(B, S, D)
 
+    def unitarity_loss(self) -> Tensor:
+        """Compute ||U^\u2020 U - I||^2_F for unitarity regularization.
+
+        Returns a scalar loss that encourages each per-block complex matrix U
+        to be unitary. This does not make the forward pass unitary by itself;
+        it only provides a differentiable penalty that can be added to the
+        training objective.
+        """
+
+        W = torch.complex(self.weight_real, self.weight_imag)  # [N, B, B]
+        W_dag = W.conj().transpose(-2, -1)
+        WdW = torch.bmm(W_dag, W)  # [N, B, B]
+        I = torch.eye(self.block_size, device=W.device, dtype=W.dtype).unsqueeze(0)
+        return ((WdW - I).abs() ** 2).mean()
+
 
 class SpinorGate(nn.Module):
-    """Gated spinor transformation with selective activation.
+    """Gated complex transformation with selective activation.
 
-    Applies: output = gate * SpinorBlock(x) + (1-gate) * x
-    where gate is input-dependent (selective mechanism from Mamba).
+    Applies a per-feature interpolation between identity and the SpinorBlock
+    transform:
+
+        output = x + gate * (SpinorBlock(x) - x)
+
+    Even if the underlying SpinorBlock matrices were unitary, this gating is
+    intentionally *not* a unitary operation for gate values in (0, 1). This is
+    by design (selectivity is the point). If you regularize unitarity, the
+    penalty should be applied to the SpinorBlock's matrix U itself (via
+    `SpinorBlock.unitarity_loss()`), not to the gated output.
     """
 
     def __init__(self, hidden_dim: int, block_size: int = 8):
@@ -129,7 +169,8 @@ class SpinorGate(nn.Module):
         # SEOP Fix 18: Scaled sigmoid ≈ Gaussian CDF, but ~3x faster than erf on CPU
         # Input to gate_proj is Gaussian (from ComplexRMSNorm). Linear projection preserves Gaussian.
         # sigmoid(Gaussian) with unit scale → bimodal at {0,1}, wastes interpolation range.
-        # sigmoid(x * 1.7015) ≈ Φ(x) within 1% everywhere (logistic ≈ probit correspondence).
+        # sigmoid(x * 1.7015) is a logistic-probit approximation to Φ(x).
+        # Max absolute error is approximately 0.0095 vs Gaussian CDF Φ(x).
         # Maps Gaussian → ~Uniform(0,1), maximizing gate entropy. Uses HW-accelerated sigmoid.
         gate = torch.sigmoid(self.gate_proj(x_real) * 1.7015)  # [B, S, D]
 

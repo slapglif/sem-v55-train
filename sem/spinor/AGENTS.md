@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # spinor
 
@@ -12,18 +12,22 @@ Complex Mamba-3 layers implementing sequential context integration via spinor ro
 | File | Description |
 |------|-------------|
 | `__init__.py` | Module exports |
-| `complex_mamba3.py` | `ComplexMamba3Layer` - main SSM layer with MIMO structure |
-| `spinor_block.py` | `SpinorBlock` - gated spinor rotation unit |
-| `complex_ops.py` | Complex arithmetic helpers (multiply, normalize) |
+| `complex_mamba3.py` | `ComplexMamba3Layer` (V5.5) + core selective SSM building blocks |
+| `spinor_block.py` | `SpinorBlock` - gated spinor rotation unit used inside Mamba |
+| `complex_ops.py` | Low-level complex helpers (e.g., `complex_mul_real`) |
+| `complex_pscan.py` | Parallel scan (Blelloch) implementation for complex/real-block SSM experiments |
+| `lindblad.py` | `LindbladDissipation` (V8) selective forgetting term |
+| `hybrid_automata.py` | `HybridAutomata` (V8) curvature monitor + Landau-Zener-style jump |
+| `quaternion.py` | `QuaternionicEscape` (V8) singularity escape mechanism |
 
 ## For AI Agents
 
 ### Working In This Directory
 
-- **SSM variant**: Mamba-style selective state space model
-- **Complex arithmetic**: All operations in complex64
-- **Sequential scan**: O(S) processing for numerical stability
-- **MIMO groups**: Parallel independent SSM channels
+- **SSM variant**: Mamba-style selective state space model (complex-valued)
+- **Complex arithmetic**: Most paths operate in `torch.complex64`
+- **Scan choices**: V5.5 uses sequential scan for stability; `complex_pscan.py` contains parallel scan utilities
+- **V8 hooks**: Lindblad / HybridAutomata / Quaternionic are used via `sem.model.ComplexMamba3LayerV8`
 
 ### Key Components
 
@@ -56,6 +60,7 @@ for t in range(seq_len):
 
 ```bash
 uv run pytest tests/test_complex_mamba.py -v
+uv run pytest tests/test_quick_convergence.py -v
 ```
 
 ### Common Patterns
@@ -67,7 +72,7 @@ uv run pytest tests/test_complex_mamba.py -v
 ## Dependencies
 
 ### Internal
-- `utils/complex_ops.py` - Complex arithmetic
+- `sem/utils/complex_ops.py` - Shared helpers (`safe_complex`, magnitude utilities)
 
 ### External
 - `torch` - Tensor operations

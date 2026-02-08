@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # data
 
@@ -12,9 +12,9 @@ Data loading and preprocessing infrastructure. Handles streaming datasets (FineW
 | File | Description |
 |------|-------------|
 | `__init__.py` | Module exports |
-| `streaming.py` | `StreamingDataset`, `create_streaming_dataloader` - HuggingFace streaming |
-| `tokenizer.py` | `SEMTokenizer` - BPE tokenizer wrapper |
-| `lightning_datamodule.py` | `SEMDataModule` - Lightning DataModule for training |
+| `streaming.py` | `FineWebEduStream` + `PackedStreamingDataset` (stream/filter/tokenize/pack) |
+| `tokenizer.py` | `SEMTokenizer` - BPE tokenizer wrapper (loads/saves `tokenizer.json`) |
+| `lightning_datamodule.py` | `SEMDataModule` - Lightning DataModule wrapping `PackedStreamingDataset` |
 
 ## For AI Agents
 
@@ -22,19 +22,18 @@ Data loading and preprocessing infrastructure. Handles streaming datasets (FineW
 
 - **Streaming**: Uses HuggingFace `datasets` with `streaming=True`
 - **Tokenization**: BPE tokenizer trained on FineWeb-Edu (32k vocab)
-- **Batching**: Dynamic batching with sequence length padding
+- **Packing**: `PackedStreamingDataset` packs documents into fixed-length sequences w/ `<doc_boundary>` token
 - **Curriculum**: Supports variable sequence lengths per stage
 
 ### Key Components
 
 ```python
-class StreamingDataset(IterableDataset):
-    """Streaming dataset from HuggingFace Hub.
+class FineWebEduStream:
+    """Stream raw documents from FineWeb-Edu with min_score filtering.
 
     Features:
-    - On-the-fly tokenization
-    - Configurable sequence length
-    - Token frequency tracking for Zipf weighting
+    - HF streaming with retry logic
+    - Optional local JSONL cache for fast restarts
     - Shuffle buffer for randomization
     """
 
@@ -52,26 +51,24 @@ class SEMDataModule(LightningDataModule):
 
 ```python
 # Batch structure
-{
-    "input_ids": Tensor[B, S],      # Token IDs
-    "attention_mask": Tensor[B, S], # Padding mask (optional)
-    "token_freqs": Tensor[V],       # EMA token frequencies (for Zipf weighting)
-}
+(token_ids, token_freqs)
+# token_ids:   Tensor[B, S]
+# token_freqs: Tensor[V] (EMA unigram frequencies; may be None in low_vram_mode)
 ```
 
 ### Testing Requirements
 
 ```bash
-# Test with real data (requires HF_TOKEN)
-uv run pytest -k "test_real_data" -v
+# Integration-level smoke test
+uv run pytest tests/test_integration.py -v
 ```
 
 ### Common Patterns
 
 - **Dataset**: `HuggingFaceFW/fineweb-edu` (default)
 - **Streaming**: `streaming=True` for memory efficiency
-- **Workers**: `num_workers=0` for streaming (IterableDataset)
-- **Shuffle buffer**: `shuffle_buffer_size` for randomization
+- **Workers**: `num_workers=0` is safest for HF streaming; higher values require careful worker cache handling
+- **Local cache**: `FineWebEduStream(cache_dir=...)` enables JSONL reuse across restarts
 
 ## Dependencies
 

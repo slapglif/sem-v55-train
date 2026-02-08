@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # lean4
 
@@ -12,12 +12,14 @@ Lean 4 formal verification proofs for SEM mathematical foundations. Contains mac
 | File | Description |
 |------|-------------|
 | `lakefile.lean` | Lake build configuration for the Lean project |
+| `SEM.lean` | Root module importing all SEM proof files |
+| `lake-manifest.json` | Pinned Lean dependencies resolved by Lake |
 
 ## Subdirectories
 
 | Directory | Purpose |
 |-----------|---------|
-| `SEM/` | Core SEM proof modules (see `SEM/AGENTS.md` if exists) |
+| `SEM/` | Core SEM proof modules (see `SEM/AGENTS.md`) |
 
 ## For AI Agents
 

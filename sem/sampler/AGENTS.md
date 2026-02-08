@@ -1,11 +1,11 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # sampler
 
 ## Purpose
 
-Born Collapse sampler implementing quantum-inspired probability extraction from complex wavefunctions. Converts complex amplitudes to token probabilities via the Born rule: P(i) = |ψ_i|².
+Collapse/sampling head converting complex hidden states into vocabulary logits and sampled tokens. Current implementation uses a log-linear projection over real/imag parts (SEOP Fix 48) rather than a quadratic Born rule.
 
 ## Key Files
 
@@ -18,35 +18,21 @@ Born Collapse sampler implementing quantum-inspired probability extraction from 
 
 ### Working In This Directory
 
-- **Born rule**: `P(token) = |⟨token|ψ⟩|² / Σ|ψ|²`
-- **Normalization**: Enforced via amplitude squared sum
-- **Sampling**: Top-k, top-p (nucleus), temperature scaling
+- **Log-linear head**: `logits = W_r·Re(psi) + W_i·Im(psi) + b`
+- **Sampling**: Temperature scaling, top-k filtering, top-p (nucleus) filtering
+- **Weight tying**: `SEMModel` ties `proj_real.weight` to `encoder.embedding.weight`
 
 ### Key Components
 
 ```python
 class BornCollapseSampler(nn.Module):
-    """Born rule collapse: ψ → probabilities → tokens.
+    """Log-linear collapse: ψ → logits → probabilities → tokens.
 
     Steps:
-    1. Project ψ to vocabulary space (complex linear)
-    2. Compute |ψ|² for each token
-    3. Normalize: p_i = |ψ_i|² / Σ|ψ_j|²
-    4. Apply temperature, top-k, top-p filtering
-    5. Sample or return logits
+    1. Project Re/Im(ψ) to logits
+    2. Apply temperature, top-k, top-p filtering
+    3. Softmax + sample (or return logits/log_probs)
     """
-```
-
-### Loss Computation
-
-```python
-# NLL loss from Born probabilities
-target_amp_sq = gather(amp_sq, targets)  # P(target)
-nll_loss = -log(target_amp_sq + eps).mean()
-
-# Unitary regularization (Σ|ψ|² ≈ 1)
-unitary_div = (log(amp_sq.sum(-1)))².mean()
-loss = nll_loss + unitary_lambda * unitary_div
 ```
 
 ### Testing Requirements
@@ -60,12 +46,12 @@ uv run pytest tests/test_born.py -v
 - **Temperature**: `temperature` scales logits before softmax
 - **Top-k**: Keep only `top_k` highest probability tokens
 - **Top-p**: Keep tokens until cumulative probability ≥ `top_p`
-- **Chunk size**: `born_chunk_size` for low VRAM mode
+- **Training loss**: computed in `sem/model.py` via `torch.nn.functional.cross_entropy`
 
 ## Dependencies
 
 ### Internal
-- `utils/complex_ops.py` - Complex magnitude operations
+- `sem/model.py` - Computes CE loss from logits + optional unitary regularization
 
 ### External
 - `torch` - Tensor operations

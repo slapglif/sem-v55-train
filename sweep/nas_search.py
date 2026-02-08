@@ -29,6 +29,18 @@ from sem.config import (
 from sem.model import SEMModel
 
 
+def _round_sig(x: float, sig: int = 2) -> float:
+    """Round to `sig` significant figures. 0.000384729 → 0.00038."""
+    if x == 0:
+        return 0.0
+    import math
+
+    d = math.ceil(math.log10(abs(x)))
+    power = sig - d
+    factor = 10**power
+    return round(x * factor) / factor
+
+
 def make_config(trial: optuna.Trial) -> SEMConfig:
     hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
     num_layers = trial.suggest_int("num_layers", 2, 8, step=2)
@@ -45,7 +57,7 @@ def make_config(trial: optuna.Trial) -> SEMConfig:
     use_quat = trial.suggest_categorical("use_quaternionic", [True, False])
     use_mhc = trial.suggest_categorical("use_mhc", [True, False])
 
-    cayley_dt = trial.suggest_float("cayley_dt", 0.01, 0.5, log=True)
+    cayley_dt = _round_sig(trial.suggest_float("cayley_dt", 0.01, 0.5, log=True))
     laplacian_sparsity = trial.suggest_int("laplacian_sparsity", 3, 7)
 
     return SEMConfig(

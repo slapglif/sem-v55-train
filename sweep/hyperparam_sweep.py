@@ -38,24 +38,47 @@ SMALL_MODEL = dict(
 )
 
 
+def _round_sig(x: float, sig: int = 2) -> float:
+    """Round to `sig` significant figures. 0.000384729 → 0.00038."""
+    if x == 0:
+        return 0.0
+    import math
+
+    d = math.ceil(math.log10(abs(x)))
+    power = sig - d
+    factor = 10**power
+    return round(x * factor) / factor
+
+
 def make_config(trial: optuna.Trial) -> SEMConfig:
-    lr = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
-    gradient_clip = trial.suggest_float("gradient_clip", 1.0, 20.0)
-    weight_decay = trial.suggest_float("weight_decay", 1e-4, 0.1, log=True)
-    unitary_lambda = trial.suggest_float("unitary_lambda", 0.001, 0.1, log=True)
-    encoder_lr_scale = trial.suggest_float("encoder_lr_scale", 0.001, 0.1, log=True)
+    # Round all floats to 2 sig figs — the model can't distinguish more
+    lr = _round_sig(trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True))
+    gradient_clip = round(
+        trial.suggest_float("gradient_clip", 1.0, 20.0)
+    )  # integer steps
+    weight_decay = _round_sig(trial.suggest_float("weight_decay", 1e-4, 0.1, log=True))
+    unitary_lambda = _round_sig(
+        trial.suggest_float("unitary_lambda", 0.001, 0.1, log=True)
+    )
+    encoder_lr_scale = _round_sig(
+        trial.suggest_float("encoder_lr_scale", 0.001, 0.1, log=True)
+    )
 
-    lindblad_gamma = trial.suggest_float("lindblad_gamma", 0.001, 0.1, log=True)
+    lindblad_gamma = _round_sig(
+        trial.suggest_float("lindblad_gamma", 0.001, 0.1, log=True)
+    )
     num_lindblad_ops = trial.suggest_int("num_lindblad_ops", 2, 8)
-    curvature_threshold = trial.suggest_float(
-        "curvature_threshold", 0.01, 1.0, log=True
+    curvature_threshold = _round_sig(
+        trial.suggest_float("curvature_threshold", 0.01, 1.0, log=True)
     )
-    condition_threshold = trial.suggest_float(
-        "condition_threshold", 10.0, 1000.0, log=True
+    condition_threshold = _round_sig(
+        trial.suggest_float("condition_threshold", 10.0, 1000.0, log=True)
     )
 
-    cayley_dt = trial.suggest_float("cayley_dt", 0.01, 0.5, log=True)
-    pit_gamma = trial.suggest_float("pit_gamma", 0.01, 2.0)
+    cayley_dt = _round_sig(trial.suggest_float("cayley_dt", 0.01, 0.5, log=True))
+    pit_gamma = round(
+        trial.suggest_float("pit_gamma", 0.01, 2.0), 2
+    )  # 2 decimal places
 
     sdr_sparsity = trial.suggest_int("sdr_sparsity", 8, 32, step=8)
 
@@ -217,7 +240,10 @@ def main():
     print(f"  Steps/sec: {best.user_attrs.get('steps_per_sec', 'N/A'):.1f}")
     print(f"  Params:")
     for k, v in best.params.items():
-        print(f"    {k}: {v}")
+        if isinstance(v, float):
+            print(f"    {k}: {_round_sig(v)}")
+        else:
+            print(f"    {k}: {v}")
 
     top_5 = sorted(
         study.trials, key=lambda t: t.value if t.value is not None else float("inf")

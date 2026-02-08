@@ -1,38 +1,23 @@
 """Lindblad Dissipation for SEM V8.0.
 
-Implements Maxwell's Demon selective forgetting via Lindblad master equation.
-Instead of perfect unitarity (which causes catastrophic retention), we allow
-controlled information loss through dissipative coupling to a "cold bath".
+Implements a deterministic dissipation/forgetting term inspired by Lindblad
+dynamics.
 
-Theory:
-    The Lindblad master equation for density matrix ρ:
-    dρ/dt = -i[H, ρ] + γ Σ_k (L_k ρ L_k† - 0.5 {L_k† L_k, ρ})
+Theory (context):
+    The GKSL/Lindblad master equation for a density matrix ρ is:
+        dρ/dt = -i[H, ρ] + γ Σ_k (L_k ρ L_k† - 0.5 {L_k† L_k, ρ})
 
-    For pure state evolution (|ψ⟩ instead of ρ):
-    d|ψ⟩/dt = -i H |ψ⟩ - 0.5 γ Σ_k L_k† L_k |ψ⟩ + √γ Σ_k L_k |ψ⟩ dW_k
+    A common pure-state quantum-trajectory form has both a deterministic drift
+    and stochastic jump/noise terms. This module implements ONLY the
+    deterministic ("no-jump") drift term:
+        d|ψ⟩/dt = -0.5·γ·(Σ_k L_k† L_k)·|ψ⟩
 
-    We implement the deterministic part (dissipation term) without the noise.
-    The key: L operators act as "entropy sinks" that selectively evaporate
-    high-entropy components while preserving low-entropy signal.
+    The stochastic jump terms (e.g. √γ·L_k·dW_k or discrete jumps) are omitted.
+    This is intentional for a deterministic neural network setting.
 
-Architecture:
-    - Learnable Lindblad operators L_k (K operators, each D×D complex)
-    - Dissipation strength γ (learnable or fixed)
-    - Applied after Remizov-Cayley propagation step
-
-SEOP Analysis:
-    Input: Complex spinor ψ ~ CN(0, σ²I) (Gaussian distribution)
-    Output: ψ_dissipated = ψ - 0.5·γ·dt·(Σ L_k† L_k)·ψ
-
-    Distributional Effect:
-    - L_k† L_k is positive semidefinite → eigenvalues λ_j ≥ 0
-    - Dissipation reduces magnitude preferentially along eigenvectors with large λ
-    - Creates "dissipation basin" that drains entropy while preserving signal subspace
-
-    Entropy Transfer per FLOP:
-    - Forward: O(K·D²) FLOPs for computing Σ L_k† L_k
-    - Entropy reduction: ΔS ≈ -γ·dt·Tr(Σ L_k† L_k) nats
-    - Efficiency: ΔS / FLOP ≈ -γ·dt·Tr(Σ L_k† L_k) / (K·D²)
+Notes:
+    - Without jump terms, only A = Σ_k L_k† L_k affects the evolution.
+    - Applying A to ψ is O(B·S·D²); forming A via dense matmuls is O(K·D³).
 """
 
 import torch
@@ -46,8 +31,12 @@ from ..utils.complex_ops import safe_complex
 class LindbladDissipation(nn.Module):
     """Lindblad dissipation layer for selective forgetting.
 
-    Implements the dissipative term of the Lindblad master equation:
-    dψ/dt = -0.5·γ·Σ_k (L_k† L_k)·ψ
+    Implements the deterministic (no-jump) dissipation drift:
+        dψ/dt = -0.5·γ·Σ_k (L_k† L_k)·ψ
+
+    This is equivalent to evolving with a non-Hermitian effective Hamiltonian
+    drift term H_eff ∝ -i·0.5·γ·Σ_k L_k† L_k. The stochastic jump terms from the
+    full Lindblad / quantum-trajectory formulation are intentionally omitted.
 
     This acts as Maxwell's Demon: selectively evaporating high-entropy
     components (noise) while preserving low-entropy signal.
@@ -72,20 +61,25 @@ class LindbladDissipation(nn.Module):
         self.dim = dim
         self.num_lindblad_ops = num_lindblad_ops
 
-        # Dissipation strength (log-parameterized for stability)
+        # Forward Euler stability note:
+        #   psi <- (I - 0.5*gamma*dt*A) psi, A = sum_k L_k^† L_k (PSD)
+        # Explicit Euler can diverge if 0.5*gamma*dt*lambda_max(A) is too large.
+        # Bound gamma to a small range to avoid runaway dissipation.
+        self.gamma_max = 0.1
+
+        # Backward-compatibility note:
+        # Historically this module exposed `log_gamma` (log of an unconstrained
+        # positive gamma). Some tests and callers still mutate/inspect it.
+        # We keep `log_gamma` but compute a sigmoid-bounded effective gamma.
         if learnable_gamma:
             self.log_gamma = nn.Parameter(torch.tensor(math.log(gamma)))
         else:
-            self.register_buffer('log_gamma', torch.tensor(math.log(gamma)))
+            self.register_buffer("log_gamma", torch.tensor(math.log(gamma)))
 
         # Lindblad operators L_k (K operators, each D×D complex)
         # Represented as real/imag components for numerical stability
-        self.L_real = nn.Parameter(
-            torch.randn(num_lindblad_ops, dim, dim) * init_scale
-        )
-        self.L_imag = nn.Parameter(
-            torch.randn(num_lindblad_ops, dim, dim) * init_scale
-        )
+        self.L_real = nn.Parameter(torch.randn(num_lindblad_ops, dim, dim) * init_scale)
+        self.L_imag = nn.Parameter(torch.randn(num_lindblad_ops, dim, dim) * init_scale)
 
         # Initialize as diagonal-dominant for stability
         with torch.no_grad():
@@ -96,7 +90,10 @@ class LindbladDissipation(nn.Module):
     @property
     def gamma(self) -> float:
         """Current dissipation strength."""
-        return self.log_gamma.exp().item()
+        gamma = (
+            torch.sigmoid(self.log_gamma - math.log(self.gamma_max)) * self.gamma_max
+        )
+        return gamma.item()
 
     def compute_lindblad_term(self) -> Tensor:
         """Compute Σ_k L_k† L_k (the dissipation operator).
@@ -106,6 +103,12 @@ class LindbladDissipation(nn.Module):
         """
         # Construct complex Lindblad operators
         L = safe_complex(self.L_real, self.L_imag)  # [K, D, D]
+
+        # NOTE: Without jump terms, only A = Σ_k L_k† L_k matters for the
+        # deterministic drift. Individual L_k are retained for:
+        #   (1) future jump-term implementations,
+        #   (2) per-operator analysis/regularization,
+        #   (3) gradient diversity (K small matrices can train differently than one A).
 
         # Compute L† for each operator
         L_dag = L.conj().transpose(-2, -1)  # [K, D, D]
@@ -135,16 +138,15 @@ class LindbladDissipation(nn.Module):
 
         # Apply dissipation: -0.5·γ·dt·(Σ L_k† L_k)·ψ
         # psi: [B, S, D], L_dag_L_sum: [D, D]
-        gamma = self.log_gamma.exp()
+        gamma = (
+            torch.sigmoid(self.log_gamma - math.log(self.gamma_max)) * self.gamma_max
+        )
         dissipation_coeff = -0.5 * gamma * dt
 
         # Matrix-vector product: [D, D] @ [B, S, D]
         # Use einsum for clarity: (i,j), (b,s,j) -> (b,s,i)
-        dissipation = dissipation_coeff * torch.einsum(
-            'ij,bsj->bsi',
-            L_dag_L_sum,
-            psi
-        )
+        # Cost: O(D^2) per (batch, seq) position
+        dissipation = dissipation_coeff * torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)
 
         # Apply dissipation to state
         psi_out = psi + dissipation
@@ -167,18 +169,19 @@ class LindbladDissipation(nn.Module):
 
         # Compute ⟨ψ|L†L|ψ⟩ = ψ† (L†L) ψ
         # ψ†: [B, S, D], L†L: [D, D], ψ: [B, S, D]
-        L_psi = torch.einsum('ij,bsj->bsi', L_dag_L_sum, psi)  # [B, S, D]
+        L_psi = torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)  # [B, S, D]
         expectation = (psi.conj() * L_psi).sum(dim=-1).real  # [B, S]
 
-        gamma = self.log_gamma.exp()
+        gamma = (
+            torch.sigmoid(self.log_gamma - math.log(self.gamma_max)) * self.gamma_max
+        )
         rate = -gamma * expectation
 
         return rate
 
     def extra_repr(self) -> str:
         return (
-            f'dim={self.dim}, num_ops={self.num_lindblad_ops}, '
-            f'gamma={self.gamma:.6f}'
+            f"dim={self.dim}, num_ops={self.num_lindblad_ops}, gamma={self.gamma:.6f}"
         )
 
 
@@ -190,6 +193,10 @@ class AdaptiveLindbladDissipation(nn.Module):
     to preserve (low entropy).
 
     Dissipation control: γ(ψ) = σ(W·|ψ|² + b)·γ_max
+
+    This implements ONLY the deterministic (no-jump) drift term. Without jump
+    terms, only A = Σ_k L_k† L_k affects the evolution, but we keep individual
+    L_k for future extensibility and analysis.
 
     Args:
         dim: Spinor dimension D
@@ -211,12 +218,8 @@ class AdaptiveLindbladDissipation(nn.Module):
         self.gamma_max = gamma_max
 
         # Lindblad operators (same as fixed-gamma version)
-        self.L_real = nn.Parameter(
-            torch.randn(num_lindblad_ops, dim, dim) * init_scale
-        )
-        self.L_imag = nn.Parameter(
-            torch.randn(num_lindblad_ops, dim, dim) * init_scale
-        )
+        self.L_real = nn.Parameter(torch.randn(num_lindblad_ops, dim, dim) * init_scale)
+        self.L_imag = nn.Parameter(torch.randn(num_lindblad_ops, dim, dim) * init_scale)
 
         # Initialize as diagonal-dominant
         with torch.no_grad():
@@ -276,7 +279,8 @@ class AdaptiveLindbladDissipation(nn.Module):
         dissipation_coeff = -0.5 * gamma * dt  # [B, S, 1]
 
         # Matrix-vector with broadcasting
-        L_psi = torch.einsum('ij,bsj->bsi', L_dag_L_sum, psi)  # [B, S, D]
+        # Cost: O(D^2) per (batch, seq) position
+        L_psi = torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)  # [B, S, D]
         dissipation = dissipation_coeff * L_psi
 
         psi_out = psi + dissipation
@@ -285,16 +289,14 @@ class AdaptiveLindbladDissipation(nn.Module):
 
     def extra_repr(self) -> str:
         return (
-            f'dim={self.dim}, num_ops={self.num_lindblad_ops}, '
-            f'gamma_max={self.gamma_max:.4f}'
+            f"dim={self.dim}, num_ops={self.num_lindblad_ops}, "
+            f"gamma_max={self.gamma_max:.4f}"
         )
 
 
 # Gradient checkpointing support
 def checkpoint_lindblad_dissipation(
-    lindblad: LindbladDissipation,
-    psi: Tensor,
-    dt: float = 1.0
+    lindblad: LindbladDissipation, psi: Tensor, dt: float = 1.0
 ) -> Tensor:
     """Wrapper for gradient checkpointing Lindblad dissipation.
 

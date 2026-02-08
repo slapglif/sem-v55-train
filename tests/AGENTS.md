@@ -1,11 +1,11 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # tests
 
 ## Purpose
 
-Pytest test suite validating core SEM components. Tests verify mathematical correctness (unitarity, probability normalization), numerical stability (no NaN/Inf), and integration between components.
+Pytest test suite validating core SEM components. Tests verify numerical stability (no NaN/Inf), unitarity/energy monitoring, mHC wiring, V8 feature integration, and end-to-end forward/backward behavior.
 
 ## Key Files
 
@@ -13,11 +13,16 @@ Pytest test suite validating core SEM components. Tests verify mathematical corr
 |------|-------------|
 | `test_integration.py` | End-to-end model tests: forward pass, gradient flow, generation |
 | `test_cayley.py` | Cayley-Soliton propagator: unitarity preservation, CG convergence |
-| `test_born.py` | Born collapse sampler: probability normalization, gradient flow |
+| `test_born.py` | Sampler head: logits shape/sanity + sampling invariants |
 | `test_sinkhorn.py` | Sinkhorn OT encoder: doubly-stochastic convergence |
 | `test_complex_mamba.py` | Complex Mamba-3 layers: SSM correctness, spinor rotations |
 | `test_unitarity.py` | Unitarity checks across full pipeline |
 | `test_has_vq.py` | Vector quantization: codebook updates, EMA behavior |
+| `test_mhc.py` | mHC (manifold-constrained hyper-connections) sinkhorn projection + residual behavior |
+| `test_layer_quality.py` | Qualitative layer tests (includes a battery of component-level invariants; ~37 tests) |
+| `test_adaptive_chunk_pscan.py` | Parallel scan chunking heuristics / correctness checks |
+| `test_gradient_checkpointing.py` | Gradient checkpointing regression coverage |
+| `test_quick_convergence.py` | Short-run convergence smoke test for major wiring regressions |
 
 ## For AI Agents
 
@@ -52,7 +57,7 @@ uv run pytest tests/ --cov=sem --cov-report=term-missing
 | Category | Tests | What They Verify |
 |----------|-------|------------------|
 | Unitarity | `test_unitarity.py`, `test_cayley.py` | |ψ|² ≈ 1 preserved |
-| Probability | `test_born.py` | Σ p_i = 1, p_i >= 0 |
+| Sampling/Logits | `test_born.py` | Filtering + sampling invariants; logits finite |
 | Convergence | `test_sinkhorn.py`, `test_cayley.py` | Iterative algorithms converge |
 | Gradients | `test_integration.py` | Backprop produces valid gradients |
 | Numerical | All tests | No NaN/Inf in forward/backward |

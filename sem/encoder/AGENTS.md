@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # encoder
 
@@ -12,16 +12,17 @@ MESH-SDR (Minimum Entropy Sparse Hyperdimensional) encoder that transforms discr
 | File | Description |
 |------|-------------|
 | `__init__.py` | Module exports |
-| `mesh_sdr.py` | `MESHEncoder` - main encoder class with OT-based sparse activation |
-| `sinkhorn.py` | `sinkhorn_log_stabilized` - numerically stable Sinkhorn-Knopp algorithm |
-| `cost_matrix.py` | Cost matrix computation for optimal transport |
+| `mesh_sdr.py` | `MESHEncoder` - token embedding → Sinkhorn OT → sparse SDR → complex lift (plus `simple_mode`) |
+| `sinkhorn.py` | `LogSinkhorn` - log-domain Sinkhorn with optional auto-ε scaling |
+| `cost_matrix.py` | `LearnedCostMatrix` - learned cost / codebook projection for OT |
 
 ## For AI Agents
 
 ### Working In This Directory
 
-- **Core algorithm**: Sinkhorn OT produces doubly-stochastic transport plan
-- **Sparsity**: Top-k selection from transport marginals
+- **Core algorithm**: Sinkhorn OT produces transport plan `T` over SDR candidates
+- **Sparsity modes**: hard top-k (sparse) vs `soft_sparse=True` (gradient-preserving)
+- **Simple mode**: `simple_mode=True` bypasses OT/SDR and returns complex embedding for weight tying
 - **Complex output**: Returns `complex64` tensor on Crystal Manifold
 
 ### Key Components
@@ -56,6 +57,7 @@ uv run pytest tests/test_sinkhorn.py -v
 - **Epsilon tuning**: `sinkhorn_epsilon` controls entropy regularization
 - **Convergence**: `sinkhorn_max_iter=50`, `sinkhorn_tol=1e-3`
 - **Low VRAM**: `low_vram_mode` processes in chunks
+- **Weight tying**: prefer `simple_mode=True` when debugging output-projection / embedding coupling
 
 ## Dependencies
 

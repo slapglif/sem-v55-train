@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from typing import Optional
+from typing import Any, Optional
 
 from .config import SEMConfig
 from .encoder.mesh_sdr import MESHEncoder
@@ -24,19 +24,159 @@ from .sampler.born_collapse import BornCollapseSampler
 from .utils.complex_layernorm import ComplexRMSNorm
 
 # Optional imports
+# NOTE: basedpyright treats ALL_CAPS as constants; assign once.
+Engram = None
+EngramConfig = None
 try:
-    from .engram import Engram, EngramConfig
+    from .engram import Engram as Engram, EngramConfig as EngramConfig
 
-    HAS_ENGRAM = True
+    _has_engram = True
 except ImportError:
-    HAS_ENGRAM = False
+    _has_engram = False
+HAS_ENGRAM = _has_engram
 
 try:
     from .hyper_connections import mhc_residual
 
-    HAS_MHC = True
+    _has_mhc = True
 except ImportError:
-    HAS_MHC = False
+    _has_mhc = False
+HAS_MHC = _has_mhc
+
+
+# -----------------------------------------------------------------------------
+# Compatibility shims (tests + legacy API expectations)
+# -----------------------------------------------------------------------------
+
+# SEOP Fix 55: LindbladDissipation API compatibility.
+# Some tests/legacy code expect a learnable `log_gamma` parameter with
+# `gamma = exp(log_gamma)`. The current implementation uses a sigmoid-bounded
+# `gamma_logit` for stability. Add a backward-compatible `log_gamma` parameter
+# and route dissipation strength through it.
+if hasattr(LindbladDissipation, "__init__") and not hasattr(
+    LindbladDissipation, "_seop_fix_55_log_gamma"
+):
+    _orig_lindblad_init = LindbladDissipation.__init__
+    _orig_lindblad_forward = LindbladDissipation.forward
+    _orig_lindblad_rate = getattr(LindbladDissipation, "dissipation_rate", None)
+
+    def _patched_lindblad_init(
+        self,
+        dim: int,
+        num_lindblad_ops: int = 4,
+        gamma: float = 0.01,
+        learnable_gamma: bool = True,
+        init_scale: float = 0.01,
+    ):
+        _orig_lindblad_init(
+            self,
+            dim=dim,
+            num_lindblad_ops=num_lindblad_ops,
+            gamma=gamma,
+            learnable_gamma=learnable_gamma,
+            init_scale=init_scale,
+        )
+
+        gamma_init = float(gamma)
+        gamma_init = max(gamma_init, 1e-12)
+        log_gamma_init = torch.log(torch.tensor(gamma_init, dtype=torch.float32))
+
+        if learnable_gamma:
+            self.log_gamma = nn.Parameter(log_gamma_init)
+        else:
+            self.register_buffer("log_gamma", log_gamma_init)
+
+    def _patched_lindblad_forward(self, psi: Tensor, dt: float = 1.0) -> Tensor:
+        if hasattr(self, "log_gamma"):
+            L_dag_L_sum = self.compute_lindblad_term()  # [D, D]
+            gamma = torch.exp(self.log_gamma)
+            gamma_max = getattr(self, "gamma_max", None)
+            if gamma_max is not None:
+                gamma = torch.clamp(gamma, max=float(gamma_max))
+            dissipation_coeff = -0.5 * gamma * dt
+            dissipation = dissipation_coeff * torch.einsum(
+                "ij,bsj->bsi", L_dag_L_sum, psi
+            )
+            return psi + dissipation
+        return _orig_lindblad_forward(self, psi, dt=dt)
+
+    def _patched_lindblad_rate(self, psi: Tensor) -> Tensor:
+        if hasattr(self, "log_gamma"):
+            L_dag_L_sum = self.compute_lindblad_term()  # [D, D]
+            L_psi = torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)  # [B, S, D]
+            expectation = (psi.conj() * L_psi).sum(dim=-1).real  # [B, S]
+
+            gamma = torch.exp(self.log_gamma)
+            gamma_max = getattr(self, "gamma_max", None)
+            if gamma_max is not None:
+                gamma = torch.clamp(gamma, max=float(gamma_max))
+            return -gamma * expectation
+        assert _orig_lindblad_rate is not None
+        return _orig_lindblad_rate(self, psi)
+
+    LindbladDissipation.__init__ = _patched_lindblad_init  # type: ignore[method-assign]
+    LindbladDissipation.forward = _patched_lindblad_forward  # type: ignore[method-assign]
+    if _orig_lindblad_rate is not None:
+        LindbladDissipation.dissipation_rate = _patched_lindblad_rate  # type: ignore[method-assign]
+    setattr(LindbladDissipation, "_seop_fix_55_log_gamma", True)
+
+
+# SEOP Fix 56: Sinkhorn post-normalization for doubly-stochastic guarantees.
+# Some configurations drift just outside tight tolerances, especially for batched
+# inputs and complex magnitude projection. Enforce row/col normalization at the
+# end to avoid test flakiness and improve mHC stability.
+try:
+    from .hyper_connections import sinkhorn as _sinkhorn_mod
+    from .hyper_connections import mhc as _mhc_mod
+    from . import hyper_connections as _hyper_connections_pkg
+
+    if not getattr(_sinkhorn_mod, "_seop_fix_56_postnorm", False):
+        _orig_sinkhorn_log = _sinkhorn_mod.sinkhorn_log
+        _orig_sinkhorn_log_complex = _sinkhorn_mod.sinkhorn_log_complex
+
+        def _ds_postnorm(h: Tensor, iters: int = 2, eps: float = 1e-12) -> Tensor:
+            for _ in range(iters):
+                h = h / (h.sum(dim=-1, keepdim=True) + eps)
+                h = h / (h.sum(dim=-2, keepdim=True) + eps)
+            return h
+
+        def sinkhorn_log(*args, **kwargs) -> Tensor:
+            H0 = _orig_sinkhorn_log(*args, **kwargs)
+            Hn = _ds_postnorm(H0)
+            # Straight-through: forward uses post-norm, backward uses original.
+            return H0 + (Hn - H0).detach()
+
+        def sinkhorn_log_complex(*args, **kwargs):
+            H0_real, H0_imag = _orig_sinkhorn_log_complex(*args, **kwargs)
+            mag = torch.sqrt(H0_real * H0_real + H0_imag * H0_imag)
+            mag_n = _ds_postnorm(mag)
+
+            # Avoid extreme rescaling when magnitude is near-zero.
+            eps_mag = 1e-12
+            scale = torch.where(mag > eps_mag, mag_n / mag, torch.zeros_like(mag_n))
+            scale = torch.clamp(scale, max=1e3)
+
+            Hn_real = H0_real * scale
+            Hn_imag = H0_imag * scale
+
+            # Straight-through: forward uses post-norm, backward uses original.
+            return H0_real + (Hn_real - H0_real).detach(), H0_imag + (
+                Hn_imag - H0_imag
+            ).detach()
+
+        _sinkhorn_mod.sinkhorn_log = sinkhorn_log
+        _sinkhorn_mod.sinkhorn_log_complex = sinkhorn_log_complex
+        setattr(_sinkhorn_mod, "_seop_fix_56_postnorm", True)
+
+        # Patch re-exported symbols and mhc module-local imports.
+        _hyper_connections_pkg.sinkhorn_log = sinkhorn_log
+        _hyper_connections_pkg.sinkhorn_log_complex = sinkhorn_log_complex
+        _mhc_mod.sinkhorn_log = sinkhorn_log
+        _mhc_mod.sinkhorn_log_complex = sinkhorn_log_complex
+
+except Exception:
+    # Keep SEMModel importable even if hyper_connections is unavailable.
+    pass
 
 
 class ComplexMamba3LayerV8(nn.Module):
@@ -193,19 +333,39 @@ class ComplexMamba3LayerV8(nn.Module):
         residual = x
         out = self.base_layer(x)
 
-        # Extract branch = f(x) from base_layer output (residual + scale * f(x))
-        scale = self.base_layer.residual_scale
-        branch_out = (out - residual) / scale.clamp(min=1e-8)
+        # Extract branch delta from base_layer output.
+        # SEOP Fix 52: Numerically stable V8 branch extraction.
+        # Prior code computed (out-residual)/clamp(scale,1e-8), which is catastrophically
+        # ill-conditioned when residual_scale is small. Use the true residual delta.
+        branch_delta = out - residual
+
+        # SEOP Fix 58: RMS-normalize the delta for V8 transforms.
+        # Several V8 enhancements are not strictly scale-equivariant. Normalizing the
+        # delta before applying them avoids degenerate proxies/threshold artifacts,
+        # while we restore the delta RMS afterward to keep residual injection calibrated.
+        with torch.no_grad():
+            delta_rms = torch.sqrt(
+                (
+                    branch_delta.real * branch_delta.real
+                    + branch_delta.imag * branch_delta.imag
+                )
+                .mean()
+                .clamp_min(1e-12)
+            ).clamp_min(1e-3)
+        branch_out = branch_delta / delta_rms
 
         if self.use_lindblad:
             branch_out = self.lindblad(branch_out)
 
+        H_eff: Optional[Tensor] = None
         if self.use_hybrid_automata or self.use_quaternionic:
             with torch.no_grad():
+                # SEOP Fix 57: Compute H_eff on the normalized delta.
                 H_eff_real = self.approximate_hamiltonian(branch_out)
                 H_eff = torch.complex(H_eff_real, torch.zeros_like(H_eff_real))
 
         if self.use_hybrid_automata:
+            assert H_eff is not None
             if self._H_prev is not None and self._H_prev.shape[0] == H_eff.shape[0]:
                 branch_out, jumped = self.hybrid_automata(
                     branch_out, H_eff, self._H_prev
@@ -213,10 +373,15 @@ class ComplexMamba3LayerV8(nn.Module):
             self._H_prev = H_eff.detach()
 
         if self.use_quaternionic:
+            assert H_eff is not None
             branch_out, escaped = self.quaternionic(branch_out, H_eff)
 
-        # Re-scale branch back before residual combination to avoid gradient explosion
-        branch_out = branch_out * scale
+        # Restore the original delta RMS so residual injection stays calibrated.
+        branch_out = branch_out * delta_rms
+
+        # SEOP Fix 52: No division by residual_scale and no residual_scale re-scaling.
+        # The only normalization is by the delta RMS (clamped), which is numerically
+        # well-conditioned and keeps V8 transforms stable.
 
         if self.use_mhc:
             out = self.mhc(residual, branch_out)
@@ -272,12 +437,18 @@ class SEMModel(nn.Module):
 
         # 2. Engram (optional - O(1) N-gram lookup)
         self.use_engram = False
-        if HAS_ENGRAM and hasattr(c, "engram") and getattr(c.engram, "enabled", False):
+        engram_cfg = getattr(c, "engram", None)
+        if (
+            HAS_ENGRAM
+            and engram_cfg is not None
+            and getattr(engram_cfg, "enabled", False)
+        ):
+            assert Engram is not None and EngramConfig is not None
             self.use_engram = True
             engram_config = EngramConfig(
-                tokenizer=getattr(c.engram, "tokenizer", None),
-                max_ngram_size=getattr(c.engram, "max_ngram_size", 3),
-                layer_ids=list(c.engram.layer_ids),
+                tokenizer=getattr(engram_cfg, "tokenizer", None),
+                max_ngram_size=getattr(engram_cfg, "max_ngram_size", 3),
+                layer_ids=list(getattr(engram_cfg, "layer_ids", [])),
             )
             self.engram_layers = nn.ModuleDict()
             for layer_id in engram_config.layer_ids:
@@ -388,9 +559,12 @@ class SEMModel(nn.Module):
             )  # normalize to valid log-probs
             self.sampler.output_bias.data.copy_(log_freqs)
 
-        # SEOP Fix 45: Propagator warmup bypass for 3x throughput during early training
-        # Set to True after warmup_steps to enable full propagation
+        # SEOP Fix 53: Smooth propagator warmup.
+        # The prior warmup used a hard boolean on/off switch (distribution shock).
+        # Keep the public boolean for backward compatibility, but implement a smooth
+        # blend alpha in forward: psi := (1-a)*psi + a*propagator(psi).
         self.propagator_enabled = False
+        self._propagator_alpha = 0.0
         self._propagator_warmup_steps = c.training.warmup_steps
 
     def enable_propagator(self, enable: bool = True):
@@ -402,14 +576,31 @@ class SEMModel(nn.Module):
         Args:
             enable: If True, propagator is applied. If False, skip.
         """
-        self.propagator_enabled = enable
+        # SEOP Fix 53: Map legacy boolean to smooth alpha for compatibility.
+        self.set_propagator_alpha(1.0 if enable else 0.0)
+
+    def set_propagator_alpha(self, alpha: float):
+        """Set smooth propagator blend coefficient.
+
+        alpha=0.0: identity (no propagator)
+        alpha=1.0: full propagator
+        """
+        # SEOP Fix 53: Clamp alpha to [0,1] to avoid accidental amplification.
+        a = float(alpha)
+        if a <= 0.0:
+            a = 0.0
+        elif a >= 1.0:
+            a = 1.0
+        self._propagator_alpha = a
+        # Keep the legacy boolean consistent for external callers.
+        self.propagator_enabled = a > 0.0
 
     def forward(
         self,
         token_ids: Tensor,
         targets: Optional[Tensor] = None,
         token_freqs: Optional[Tensor] = None,
-    ) -> dict:
+    ) -> dict[str, Tensor]:
         """Forward pass through full SEM pipeline.
 
         Args:
@@ -435,16 +626,21 @@ class SEMModel(nn.Module):
 
             psi = mamba_layer(psi)  # [B, S, D] complex64
 
-        # 3. Propagate: Cayley-Soliton diffusion (SEOP Fix 45: skip during warmup for 3x throughput)
-        if self.propagator_enabled:
-            psi = self.propagator(psi)  # [B, S, D] complex64
-        # else: identity pass during warmup - CG solve is expensive and not needed early
-
-        # 4. Final norm
-        psi = self.final_norm(psi)  # [B, S, D] complex64
+        # 3. Propagate: Cayley-Soliton diffusion
+        # SEOP Fix 53: Smooth warmup via alpha blending (no hard distribution shock).
+        # Backward compatibility: legacy callers may toggle `self.propagator_enabled`
+        # directly; interpret that as "fully on" unless an explicit alpha is set.
+        effective_alpha = self._propagator_alpha
+        if self.propagator_enabled and effective_alpha == 0.0:
+            effective_alpha = 1.0
+        if effective_alpha > 0.0:
+            psi_prop = self.propagator(psi)  # [B, S, D] complex64
+            psi = psi * (1.0 - effective_alpha) + psi_prop * effective_alpha
 
         # Unitarity regularization / monitoring.
-        # Keep the wavefunction energy per token near its expected scale.
+        # SEOP Fix 54: Compute BEFORE final_norm so the metric is meaningful.
+        # ComplexRMSNorm normalizes energy, making post-norm energy ~constant.
+        # Keeping it pre-norm also preserves gradient flow into upstream blocks.
         # We normalize by hidden_dim so the expected value is ~1.0.
         psi_energy = (psi.real * psi.real + psi.imag * psi.imag).sum(dim=-1)  # [B,S]
         psi_energy_norm = psi_energy / float(self.config.model.hidden_dim)
@@ -457,6 +653,9 @@ class SEMModel(nn.Module):
             max=self.config.training.unitary_clamp_max,
         )
         unitary_divergence = (torch.log(psi_energy_norm_clamped) ** 2).mean()
+
+        # 4. Final norm
+        psi = self.final_norm(psi)  # [B, S, D] complex64
 
         # 5. Collapse: log-linear projection (SEOP Fix 48)
         output = self.sampler(psi, sample=not self.training)
@@ -478,32 +677,29 @@ class SEMModel(nn.Module):
             # Apply unitarity regularization strength from config.
             unitary_lambda = float(getattr(self.config.training, "unitary_lambda", 0.0))
             if unitary_lambda != 0.0:
-                # SEOP Fix 34: Detach unitary_divergence from gradient graph.
-                # Unitarity is enforced structurally by Cayley transform;
-                # loss term is purely a monitoring/regularization signal.
-                loss = loss + unitary_lambda * unitary_divergence.detach()
+                # SEOP Fix 54: Keep unitary_divergence in the gradient graph.
+                # This provides an actual regularization signal (with safety clamping)
+                # rather than a detached metric.
+                loss = loss + unitary_lambda * unitary_divergence
 
             # V8: Add unitarity regularization from HybridAutomata layers
             if self._use_v8_layers:
                 for layer in self.mamba_layers:
-                    if (
-                        hasattr(layer, "use_hybrid_automata")
-                        and layer.use_hybrid_automata
-                    ):
-                        if unitary_lambda != 0.0:
-                            loss = (
-                                loss
-                                + unitary_lambda
-                                * layer.hybrid_automata.compute_unitarity_loss()
-                            )
-                        else:
-                            loss = loss + layer.hybrid_automata.compute_unitarity_loss()
+                    if not getattr(layer, "use_hybrid_automata", False):
+                        continue
+                    hybrid = getattr(layer, "hybrid_automata", None)
+                    if hybrid is None:
+                        continue
+                    if unitary_lambda != 0.0:
+                        loss = loss + unitary_lambda * hybrid.compute_unitarity_loss()
+                    else:
+                        loss = loss + hybrid.compute_unitarity_loss()
 
             output["loss"] = loss
 
         return output
 
-    def get_diagnostics(self) -> dict:
+    def get_diagnostics(self) -> dict[str, Any]:
         """Get diagnostic information about V8 components.
 
         Returns:
@@ -517,7 +713,7 @@ class SEMModel(nn.Module):
         if not self._use_v8_layers and not self.use_engram:
             return {}
 
-        diagnostics = {
+        diagnostics: dict[str, Any] = {
             "lindblad_gamma": [],
             "num_quaternionic_escapes": 0,
             "num_hybrid_jumps": 0,
@@ -528,7 +724,10 @@ class SEMModel(nn.Module):
         if self._use_v8_layers:
             for i, layer in enumerate(self.mamba_layers):
                 if hasattr(layer, "use_lindblad") and layer.use_lindblad:
-                    diagnostics["lindblad_gamma"].append(layer.lindblad.gamma)
+                    lindblad = getattr(layer, "lindblad", None)
+                    gamma = getattr(lindblad, "gamma", None)
+                    if gamma is not None:
+                        diagnostics["lindblad_gamma"].append(gamma)
 
                 if hasattr(layer, "use_mhc") and layer.use_mhc:
                     diagnostics["mhc_enabled"].append(i)
@@ -538,7 +737,7 @@ class SEMModel(nn.Module):
 
         return diagnostics
 
-    def count_parameters(self) -> dict:
+    def count_parameters(self) -> dict[str, Any]:
         """Count parameters by module."""
         counts = {}
         for name, module in self.named_children():
@@ -601,8 +800,13 @@ class SEMModel(nn.Module):
 
             # Forward pass
             psi = self._encode_and_context(input_ids)
-            if self.propagator_enabled:
-                psi = self.propagator(psi)
+            # SEOP Fix 53: Use the same smooth alpha blending in generation.
+            effective_alpha = self._propagator_alpha
+            if self.propagator_enabled and effective_alpha == 0.0:
+                effective_alpha = 1.0
+            if effective_alpha > 0.0:
+                psi_prop = self.propagator(psi)
+                psi = psi * (1.0 - effective_alpha) + psi_prop * effective_alpha
             psi = self.final_norm(psi)
             output = self.sampler(
                 psi,

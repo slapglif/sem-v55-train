@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # configs
 
@@ -16,12 +16,15 @@ YAML configuration files for different hardware targets and training scenarios. 
 | `a100_optimized.yaml` | NVIDIA A100 - large batch, high throughput |
 | `a10g_speed.yaml` | NVIDIA A10G - balanced speed/memory |
 | `l40s_full.yaml` | NVIDIA L40S - full precision, production |
+| `h100_max.yaml` | NVIDIA H100 - aggressive throughput/memory settings |
+| `rtx3060_max.yaml` | RTX 3060 - constrained VRAM tuning |
 | `xpu_optimized.yaml` | Intel XPU - Real-Block mode, eager execution |
 | `edge.yaml` | CPU/Edge devices - reduced dimensions |
 | `cloud_fast.yaml` | Quick cloud training runs |
 | `cloud_a10g.yaml` | Cloud A10G specific settings |
 | `test.yaml` | Minimal config for unit tests |
 | `test_real_data.yaml` | Test config with real FineWeb data |
+| `v8_test.yaml` | Small V8 feature smoke-test config |
 | `training.yaml` | Reference training configuration |
 
 ## For AI Agents
@@ -68,7 +71,7 @@ curriculum:
 
 ```bash
 # Validate config loads correctly
-python -c "from sem.config import SEMConfig; SEMConfig.from_yaml('configs/default.yaml')"
+uv run python -c "from sem.config import SEMConfig; SEMConfig.from_yaml('configs/default.yaml')"
 ```
 
 ### Common Patterns

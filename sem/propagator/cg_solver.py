@@ -1,14 +1,28 @@
-"""Conjugate Gradient solver with differentiable backward pass.
+"""Conjugate Gradient (CG) solver used by the Cayley-Soliton propagator.
 
-Solves the linear system Ax = b where A = (I + i*dt/2 * H) for the
-Cayley diffusion step. The backward pass uses implicit differentiation:
+This module contains two CG entry points with different backward behavior:
 
-If f(x, theta) = Ax - b = 0, then:
-    dx/dtheta = -A^{-1} (dA/dtheta * x)
+- `cg_solve` (dense matrix): standard CG on an explicit (Hermitian) SPD matrix.
+  The custom autograd Function implements an implicit-diff style backward by
+  solving the adjoint system.
 
-This requires another CG solve in the backward pass, but avoids
-storing all intermediate CG iterates (memory-efficient).
+- `cg_solve_sparse` (matvec): forward runs CG under `torch.no_grad()` and the
+  backward uses a straight-through estimator (STE) that keeps gradients flowing
+  without storing CG iterates:
+
+      x ~= x_star + (b - A(x_star))
+
+  This is *not* true implicit differentiation; it is a first-order / Neumann-
+  style approximation to A^{-1} (treating A^{-1} ~= I in the backward).
+
+CG guarantees apply to symmetric/Hermitian positive definite systems. The
+Cayley diffusion operator (in real-block form) is not symmetric in the
+standard Euclidean inner product, but it is normal and well-conditioned.
+We therefore monitor the achieved residual and can fall back to a direct
+solve if convergence is poor.
 """
+
+import warnings
 
 import torch
 from torch import Tensor
@@ -59,10 +73,17 @@ def _cg_solve(
     precond: Optional[Callable[[Tensor], Tensor]] = None,
     x0: Optional[Tensor] = None,
 ) -> Tensor:
-    """Conjugate Gradient solver for Hermitian positive definite systems.
+    """Conjugate Gradient solver.
+
+    CG has formal convergence guarantees only for (Hermitian) SPD operators.
+    The Cayley propagator uses CG on a real-block operator with a large
+    skew-symmetric component (i.e. it is not symmetric in the usual inner
+    product), so those guarantees do not strictly apply. In that case we rely
+    on the operator's structure (normal + well-conditioned) and add residual
+    monitoring / safety fallback in `cg_solve_sparse`.
 
     NOTE: This function disables AMP autocast to ensure float32 precision.
-    bf16 has only ~3 decimal digits — CG needs ~7 to converge to tol=1e-7.
+    bf16 has only ~3 decimal digits -- CG needs ~7 to converge to tol=1e-7.
     Without this, the Cayley propagator's unitarity guarantee breaks.
     """
     # SEOP Fix 27: Force float32 precision for CG solver.
@@ -178,17 +199,26 @@ def cg_solve(A: Tensor, b: Tensor, max_iter: int = 20, tol: float = 1e-6) -> Ten
 
 
 def cg_solve_sparse(
-    matvec_fn: Callable,
+    matvec_fn: Callable[[Tensor], Tensor],
     b: Tensor,
     max_iter: int = 20,
     tol: float = 1e-6,
     precond=None,
     x0: Optional[Tensor] = None,
 ) -> Tensor:
-    """CG solve using sparse matvec with implicit differentiation.
+    """CG solve using a matvec callback.
 
-    Uses the mathematical trick: x = x_star + (b - A @ x_star)
-    to avoid storing all CG iterates while maintaining gradient flow.
+    Forward pass:
+      Runs CG under `torch.no_grad()` to compute `x_star`.
+
+    Backward pass:
+      Uses a straight-through estimator (STE):
+
+          x = x_star + (b - A(x_star))
+
+      This keeps gradients flowing into `b` (identity) and into parameters
+      captured by `matvec_fn` through the residual term, but it is *not* true
+      implicit differentiation (no adjoint solve; effectively A^{-1} ~= I).
 
     Args:
         matvec_fn: Callable v -> A @ v (must be differentiable)
@@ -211,9 +241,82 @@ def cg_solve_sparse(
         with torch.no_grad():
             x_star = _cg_solve(matvec_fn, b, max_iter, tol, precond=precond, x0=x0)
 
+            # Convergence safety: CG is only guaranteed for SPD systems. When CG is
+            # applied to the Cayley real-block operator (non-symmetric), it usually
+            # converges due to structure + preconditioning, but we still sanity-check
+            # the achieved relative residual and fall back if it is poor.
+            warn_thresh = 0.1
+            Ax_star_ng = matvec_fn(x_star)
+            residual_ng = b - Ax_star_ng
+
+            if torch.is_complex(b):
+                dim = b.shape[-1]
+                residual_rb = torch.view_as_real(residual_ng).reshape(-1, dim, 2)
+                b_rb = torch.view_as_real(b).reshape(-1, dim, 2)
+            else:
+                dim = b.shape[-2]
+                residual_rb = residual_ng.reshape(-1, dim, 2)
+                b_rb = b.reshape(-1, dim, 2)
+
+            r_norm = torch.norm(residual_rb, dim=(-2, -1))
+            b_norm = torch.norm(b_rb, dim=(-2, -1)) + 1e-12
+            rel_r = r_norm / b_norm
+
+            need_fallback = (~torch.isfinite(rel_r)) | (rel_r > warn_thresh)
+
+            if bool((rel_r > warn_thresh).any()):
+                warnings.warn(
+                    (
+                        "cg_solve_sparse: CG did not reach an acceptable residual "
+                        f"(max rel_residual={rel_r.max().item():.3e} > {warn_thresh}). "
+                        "Falling back to torch.linalg.solve for the failing systems."
+                    ),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+            if bool(need_fallback.any()):
+                # Build a dense matrix A from the matvec by probing basis vectors.
+                # This is expensive, but only used as a rare safety fallback when
+                # CG fails to converge.
+                idx = need_fallback.nonzero(as_tuple=False).flatten()
+
+                if torch.is_complex(b):
+                    # Complex linear system: build A by applying matvec to I.
+                    A_cols = matvec_fn(torch.eye(dim, device=b.device, dtype=b.dtype))
+                    A_dense = A_cols.transpose(0, 1).contiguous()  # [D, D]
+
+                    b_flat = b.reshape(-1, dim)
+                    x_flat = x_star.reshape(-1, dim).clone()
+                    b_bad = b_flat.index_select(0, idx)
+                    x_bad = torch.linalg.solve(A_dense, b_bad.T).T
+                    x_flat.index_copy_(0, idx, x_bad)
+                    x_star = x_flat.reshape_as(x_star)
+                else:
+                    # Real-block representation of a complex operator: build a
+                    # complex A from real basis probes.
+                    eye = torch.eye(dim, device=b.device, dtype=b.dtype)
+                    basis = torch.zeros((dim, dim, 2), device=b.device, dtype=b.dtype)
+                    basis[:, :, 0] = eye
+
+                    A_cols = torch.view_as_complex(matvec_fn(basis).contiguous())
+                    A_dense = A_cols.transpose(0, 1).contiguous()  # [D, D]
+
+                    b_c = torch.view_as_complex(b_rb.contiguous())
+                    x_c = torch.view_as_complex(x_star.reshape(-1, dim, 2).contiguous())
+
+                    b_bad = b_c.index_select(0, idx)
+                    x_bad = torch.linalg.solve(A_dense, b_bad.T).T
+
+                    x_c = x_c.clone()
+                    x_c.index_copy_(0, idx, x_bad)
+                    x_star = torch.view_as_real(x_c).reshape_as(x_star)
+
         if torch.is_grad_enabled() and b.requires_grad:
             Ax = matvec_fn(x_star)
             residual = b - Ax
+            # STE (straight-through estimator): treat x_star as a constant but allow
+            # gradients to flow through the residual term.
             x = x_star + residual
         else:
             x = x_star

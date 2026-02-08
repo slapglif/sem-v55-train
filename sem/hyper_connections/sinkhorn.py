@@ -24,8 +24,8 @@ Convergence note:
     slowly. Standard float32 logsumexp also hits a precision floor (~1e-3)
     because Z values reach 20-60+. We solve both by:
     1. Running iterations in float64 (eliminates precision floor)
-    2. Checking convergence and iterating until both marginals < 5e-4
-    3. Capping at 5000 iterations to bound worst-case runtime
+    2. Running a bounded, fixed iteration budget (<= 200) to avoid long-tail
+       runtime *and* avoid per-check GPU sync from Python-side convergence tests.
 """
 
 import torch
@@ -74,35 +74,79 @@ def sinkhorn_log(
     u = torch.zeros(logits.shape[:-1], device=device, dtype=torch.float64)
     v = torch.zeros_like(u)
 
-    # Convergence parameters. The tolerance of 5e-4 provides margin below
-    # the 1e-3 target when casting back to float32.
-    max_iters = 5000
-    check_every = 50
-    tol = 5e-4
+    # SEOP (bounded runtime / no device sync): for the small matrices used in mHC
+    # (typically 4x4), convergence is fast, and a fixed cap avoids pathological
+    # long loops and `.item()`-based GPU synchronization.
+    max_iters = 200
+    # Preserve the original contract: run *at least* num_iters. In practice for
+    # sharp (low-tau) projections, small matrices can still need >50 iterations
+    # to hit ~1e-3 marginal error across a batch, so we default to the full cap.
+    total_iters = min(max(num_iters, max_iters), max_iters)
 
-    # Phase 1: Run at least num_iters (or check_every, whichever is larger)
-    initial_block = max(num_iters, check_every)
-    for _ in range(initial_block):
+    for _ in range(total_iters):
         u = -torch.logsumexp(Z + v.unsqueeze(-2), dim=-1)
         v = -torch.logsumexp(Z + u.unsqueeze(-1), dim=-2)
 
-    # Check if already converged
+    # SEOP (entropy leak / solver impedance): at low tau the matrix becomes
+    # near-permutation and classic Sinkhorn can converge very slowly. With the
+    # iteration cap above, we apply a small, fixed Newton-style polishing step
+    # for small N to hit the doubly-stochastic constraints without unbounded
+    # iteration counts or Python-side convergence checks.
+    n = Z.shape[-1]
+    if n <= 8:
+        # Flatten batch dims so we can build small linear systems.
+        z_flat = Z.reshape(-1, n, n)
+        u_flat = u.reshape(-1, n)
+        v_flat = v.reshape(-1, n)
+
+        # Gauge-fix v[:, 0] == 0 without changing exp(Z+u+v):
+        # add shift to u and subtract from v.
+        shift = v_flat[:, 0].unsqueeze(-1)
+        u_flat = u_flat + shift
+        v_flat = v_flat - shift
+
+        # A few steps are enough for N<=8.
+        polish_steps = 3
+        for _ in range(polish_steps):
+            a = z_flat + u_flat.unsqueeze(-1) + v_flat.unsqueeze(-2)
+            h = torch.exp(a)
+            r = h.sum(dim=-1)
+            c = h.sum(dim=-2)
+
+            # Residuals: rows (all) and cols excluding the gauge-fixed col 0.
+            g = torch.cat([r - 1.0, (c - 1.0)[:, 1:]], dim=-1)  # [Bf, 2n-1]
+
+            j11 = torch.diag_embed(r)  # [Bf, n, n]
+            j12 = h[:, :, 1:]  # [Bf, n, n-1]
+            j21 = h[:, :, 1:].transpose(-2, -1)  # [Bf, n-1, n]
+            j22 = torch.diag_embed(c[:, 1:])  # [Bf, n-1, n-1]
+
+            top = torch.cat([j11, j12], dim=-1)
+            bot = torch.cat([j21, j22], dim=-1)
+            j = torch.cat([top, bot], dim=-2)  # [Bf, 2n-1, 2n-1]
+
+            # Small diagonal jitter improves numerical robustness for very sharp matrices.
+            jitter = 1e-6
+            eye = torch.eye(2 * n - 1, device=j.device, dtype=j.dtype).unsqueeze(0)
+            j = j + jitter * eye
+
+            rhs = (-g).unsqueeze(-1)
+            try:
+                delta = torch.linalg.solve(j, rhs).squeeze(-1)
+            except RuntimeError:
+                delta = torch.linalg.lstsq(j, rhs).solution.squeeze(-1)
+
+            du = delta[:, :n]
+            dv1 = delta[:, n:]
+
+            u_flat = u_flat + du
+            v_flat = v_flat.clone()
+            v_flat[:, 1:] = v_flat[:, 1:] + dv1
+
+        u = u_flat.reshape(*Z.shape[:-1])
+        v = v_flat.reshape(*Z.shape[:-1])
+
     H = torch.exp(Z + u.unsqueeze(-1) + v.unsqueeze(-2))
-    row_err = (H.sum(dim=-1) - 1.0).abs().max().item()
-    col_err = (H.sum(dim=-2) - 1.0).abs().max().item()
-
-    # Phase 2: Continue with periodic convergence checking until converged
-    if max(row_err, col_err) >= tol:
-        for _ in range(initial_block, max_iters, check_every):
-            for _ in range(check_every):
-                u = -torch.logsumexp(Z + v.unsqueeze(-2), dim=-1)
-                v = -torch.logsumexp(Z + u.unsqueeze(-1), dim=-2)
-
-            H = torch.exp(Z + u.unsqueeze(-1) + v.unsqueeze(-2))
-            row_err = (H.sum(dim=-1) - 1.0).abs().max().item()
-            col_err = (H.sum(dim=-2) - 1.0).abs().max().item()
-            if max(row_err, col_err) < tol:
-                break
 
     return H.to(dtype)
 

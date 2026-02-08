@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # sem
 
@@ -12,10 +12,10 @@ Core Python package implementing the Signal-Entropic Model V5.5 "Lean Crystal" a
 | File | Description |
 |------|-------------|
 | `__init__.py` | Package version (`5.5.0`) and exports |
-| `model.py` | `SEMModel` - top-level model assembling encoder→spinors→propagator→sampler |
-| `config.py` | `SEMConfig` dataclasses for all configuration sections |
-| `train.py` | Standalone training script (non-Lightning) |
-| `generate.py` | Text generation utilities |
+| `model.py` | `SEMModel` and V8 wiring (mHC/Lindblad/HybridAutomata/Quaternionic/Engram hooks) |
+| `config.py` | `SEMConfig` dataclasses (incl. `V8Config`) + YAML loader |
+| `train.py` | CLI training entry point using `SEMTrainer` (non-Lightning) |
+| `generate.py` | Checkpoint load + sampling-based generation helper |
 
 ## Subdirectories
 
@@ -24,11 +24,13 @@ Core Python package implementing the Signal-Entropic Model V5.5 "Lean Crystal" a
 | `encoder/` | MESH-SDR encoder: tokens → sparse complex SDR via Sinkhorn OT (see `encoder/AGENTS.md`) |
 | `spinor/` | Complex Mamba-3 layers: sequential context via spinor rotations (see `spinor/AGENTS.md`) |
 | `propagator/` | Cayley-Soliton propagator: unitary wave diffusion via CG solver (see `propagator/AGENTS.md`) |
-| `sampler/` | Born Collapse sampler: wavefunction → probabilities via |ψ|² (see `sampler/AGENTS.md`) |
+| `sampler/` | Collapse sampler: complex state → vocab logits + sampling (see `sampler/AGENTS.md`) |
 | `quantizer/` | Vector quantization, Fisher tracking, outlier handling (see `quantizer/AGENTS.md`) |
 | `data/` | Data loading, streaming, tokenization (see `data/AGENTS.md`) |
 | `training/` | Training infrastructure: Lightning module, callbacks, schedulers (see `training/AGENTS.md`) |
 | `utils/` | Utilities: complex ops, layer norms, optimizers, metrics (see `utils/AGENTS.md`) |
+| `engram/` | N-gram hash-based embedding augmentation (DeepSeek-style), conv-gated mixing (see `engram/AGENTS.md`) |
+| `hyper_connections/` | Manifold-constrained residuals (mHC) via Sinkhorn projection (see `hyper_connections/AGENTS.md`) |
 
 ## For AI Agents
 
@@ -48,7 +50,7 @@ for layer in self.mamba_layers:
     psi = layer(psi)                    # Spinor rotation
 psi = self.propagator(psi)              # Cayley-Soliton diffusion
 psi = self.final_norm(psi)              # ComplexRMSNorm
-output = self.sampler(psi, targets)     # Born collapse → logits + loss
+output = self.sampler(psi)              # Collapse → logits (+ optional sampling)
 ```
 
 ### Testing Requirements
@@ -64,7 +66,7 @@ uv run pytest tests/test_integration.py -v
 ### Common Patterns
 
 - **Config access**: `config.model.hidden_dim`, `config.training.learning_rate`
-- **Loss computation**: NLL + unitary regularization (`unitary_lambda * log(Σ|ψ|²)²`)
+- **Loss computation**: CE on `output['logits']` + optional unitary regularization (see `SEMModel.forward`)
 - **Parameter counting**: `model.count_parameters()` returns dict by module
 
 ## Dependencies

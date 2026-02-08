@@ -7,7 +7,9 @@ The Born rule P(token) = |W·psi|^2 has a fundamental rank deficiency:
 This means the model CANNOT produce arbitrary probability distributions.
 
 Log-linear projection: logits = W_r @ Re(psi) + W_i @ Im(psi) + bias
-Uses 2D = 256 real degrees of freedom -> full rank for any V.
+The projection has rank ≤ 2D (e.g., 256 for D=128), not full rank over V.
+This is intentional: the bias term provides a full-rank offset (Zipf prior),
+and the 2D-rank perturbation provides context-dependent adjustments.
 Standard softmax cross-entropy loss applies directly.
 
 Supports:
@@ -33,6 +35,12 @@ class BornCollapseSampler(nn.Module):
     2. Temperature scaling
     3. Top-k / Top-p filtering
     4. Categorical sampling or argmax
+
+    Weight tying: In SEM, proj_real.weight is tied to encoder.embedding.weight.
+    proj_imag.weight is untied, giving the imaginary channel independent capacity.
+    This asymmetry is an intentional inductive bias — Re(psi) carries the
+    "semantic" signal (tied to token embeddings), Im(psi) carries "phase" info
+    (position, context modulation).
     """
 
     def __init__(
@@ -86,7 +94,13 @@ class BornCollapseSampler(nn.Module):
         return logits.masked_fill(logits < threshold, float("-inf"))
 
     def apply_top_p(self, logits: Tensor, p: Optional[float] = None) -> Tensor:
-        """Apply nucleus (top-p) filtering."""
+        """Apply nucleus (top-p) filtering.
+
+        SEOP optimization note: When used after top_k filtering, most entries are -inf.
+        torch.sort puts -inf last (descending), and softmax(-inf)=0, so cumulative_probs
+        naturally excludes them. The O(V log V) sort is the main cost; for V=50k this is
+        ~0.5ms, acceptable for inference. For training, top_p is not applied (sample=False).
+        """
         p = p if p is not None else self.top_p
         if p >= 1.0:
             return logits

@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # propagator
 
@@ -12,9 +12,9 @@ Cayley-Soliton propagator implementing unitary wave propagation through a learne
 | File | Description |
 |------|-------------|
 | `__init__.py` | Module exports |
-| `cayley_soliton.py` | `CayleySolitonStack` - main propagator with soliton envelope |
-| `cg_solver.py` | `cg_solve_complex` - CG solver for complex linear systems |
-| `hamiltonian.py` | `SparseHamiltonian` - learned sparse Graph Laplacian |
+| `cayley_soliton.py` | `CayleySolitonPropagator` + `CayleySolitonStack` (phase rotation + Cayley diffusion) |
+| `cg_solver.py` | `cg_solve` / `cg_solve_sparse` with implicit-diff backward (real-block matvec) |
+| `hamiltonian.py` | `GraphLaplacianHamiltonian` + `MultiScaleHamiltonian` (small-world sparse Laplacian pyramid) |
 | `unitarity_check.py` | Unitarity verification utilities |
 
 ## For AI Agents
@@ -23,8 +23,9 @@ Cayley-Soliton propagator implementing unitary wave propagation through a learne
 
 - **Cayley transform**: `U = (I - iH/2)(I + iH/2)^{-1}` preserves unitarity
 - **CG solver**: Iterative solve of `(I + iH/2)x = (I - iH/2)ψ`
-- **Soliton envelope**: `pit_gamma` controls sech-envelope width (SEOP Fix 29)
-- **Implicit differentiation**: CG gradients via implicit function theorem
+- **Nonlinear phase step**: uses per-dim `alpha` + PIT-like `pit_gamma` phase shaping (SEOP Fix 29)
+- **Warm-start**: `_psi_cache` stores last CG solution as `x0` to reduce iterations
+- **Implicit differentiation**: CG gradients via implicit differentiation in `cg_solver.py`
 
 ### Key Components
 
@@ -46,6 +47,7 @@ class CayleySolitonStack(nn.Module):
 - **Tolerance**: `cg_tol=1e-6`
 - **Lazy CG**: Skip iterations if residual already small
 - **Direct solve**: Optional for small systems
+- **Autocast**: CG explicitly disables AMP autocast to keep float32 precision
 
 ### Testing Requirements
 
@@ -58,17 +60,17 @@ uv run pytest tests/test_unitarity.py -v
 
 - **Laplacian sparsity**: `laplacian_sparsity` controls graph connectivity
 - **Time step**: `cayley_dt` scales Hamiltonian strength
-- **Nonlinear alpha**: Phase-dependent rotation strength
+- **Nonlinear alpha**: Learnable per-dimension envelope strength (`CayleySolitonPropagator.alpha`)
 
 ## Dependencies
 
 ### Internal
-- `utils/sparse_utils.py` - Sparse matrix operations
+- `sem/utils/complex_ops.py` - Safe complex construction utilities
+- `sem/spinor/complex_ops.py` - Complex helpers used by phase rotation
 
 ### External
 - `torch` - Tensor operations
-- `scipy.sparse` - Sparse Laplacian construction
 
 <!-- MANUAL:
-SEOP Fix 29: Added pit_gamma soliton envelope for XPU stability
+SEOP Fix 29: `pit_gamma` phase shaping + bounded envelope for XPU stability
 -->

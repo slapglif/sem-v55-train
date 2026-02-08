@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # SEM V5.5 "Lean Crystal" - Signal-Entropic Model
 
@@ -22,6 +22,8 @@ The architecture operates entirely in **complex64** space (or Real-Block Isomorp
 | `launch_job.py` | Launch training jobs on HuggingFace Spaces |
 | `push_to_hub.py` | Upload code/checkpoints to HuggingFace Hub |
 | `test_xpu_local.py` | Local validation script for XPU/CPU testing |
+| `sweep/hyperparam_sweep.py` | Optuna hyperparameter sweep (fast synthetic convergence proxy) |
+| `sweep/nas_search.py` | Optuna NAS search over architecture + V8 feature toggles |
 | `Dockerfile` | Container build for cloud training |
 | `uv.lock` | Locked dependencies for reproducible builds |
 
@@ -31,8 +33,12 @@ The architecture operates entirely in **complex64** space (or Real-Block Isomorp
 |-----------|---------|
 | `sem/` | Core Python package - model, training, components (see `sem/AGENTS.md`) |
 | `configs/` | YAML configuration files for different hardware profiles (see `configs/AGENTS.md`) |
+| `sweep/` | Optuna sweep + NAS scripts and local study artifacts (see `sweep/AGENTS.md`) |
 | `tests/` | Pytest test suite for components (see `tests/AGENTS.md`) |
 | `lean4/` | Lean 4 formal verification proofs (see `lean4/AGENTS.md`) |
+| `tokenizer/` | Tokenizer artifacts (e.g. `tokenizer.json`) |
+| `runs/` | Training runs: checkpoints, logs, metrics |
+| `logs/` | Job / launch logs and monitoring outputs |
 | `.github/` | CI/CD workflows |
 | `.sisyphus/` | Persistent planning documents (SEOP fixes, execution plans) |
 
@@ -80,8 +86,9 @@ uv run pytest tests/test_born.py -v
 - `torch>=2.2.0` - Core tensor operations
 - `scipy>=1.11.0` - Sparse matrix operations (Laplacian)
 - `einops>=0.7.0` - Tensor rearrangement
-- `lightning` - Training framework (optional)
+- `pytorch-lightning` - Training framework (optional)
 - `datasets`, `transformers`, `tokenizers` - HuggingFace ecosystem
+- `optuna` - Hyperparameter sweep + NAS search (`sweep/`)
 
 ## Hardware Support
 

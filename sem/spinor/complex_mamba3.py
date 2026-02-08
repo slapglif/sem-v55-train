@@ -139,8 +139,9 @@ class ComplexSSMState(nn.Module):
         # softplus compresses Gaussian left tail. exp() maps Gaussian→LogNormal,
         # the natural parameterization for positive timescales.
         x_real = torch.cat([x.real, x.imag], dim=-1)  # [B, S, G, 2D]
-        dt_both = torch.clamp(
-            torch.exp(self.dt_proj(x_real)), min=1e-4, max=2.0
+        dt_logits = self.dt_proj(x_real)  # [B, S, G, 2]
+        dt_both = torch.exp(
+            dt_logits.clamp(min=math.log(1e-4), max=math.log(2.0))
         )  # [B, S, G, 2]
         dt_mag = dt_both[..., :1]  # [B, S, G, 1]
         dt_phase = dt_both[..., 1:]  # [B, S, G, 1]
@@ -176,8 +177,19 @@ class ComplexSSMState(nn.Module):
         # - Memory bandwidth reduction: 25% (A takes 50% less, X unchanged)
         # - Compute: auto-promotes to float32 in pscan ops
         if self.use_mixed_precision_a and torch.cuda.is_bf16_supported():
-            A_r = A_bar_r.to(torch.bfloat16)  # [B, S, G, N]
-            A_i = A_bar_i.to(torch.bfloat16)  # [B, S, G, N]
+            # Only use bf16 for channels safely away from 1.0
+            # Near 1.0, bf16 ULP = 0.0078 → τ error explodes
+            safe_for_bf16 = (A_mag < 0.98).detach()  # [B, S, G, N] bool
+            A_r = torch.where(
+                safe_for_bf16,
+                A_bar_r.to(torch.bfloat16).to(torch.float32),
+                A_bar_r,
+            )
+            A_i = torch.where(
+                safe_for_bf16,
+                A_bar_i.to(torch.bfloat16).to(torch.float32),
+                A_bar_i,
+            )
         else:
             A_r = A_bar_r.to(torch.float32)  # [B, S, G, N]
             A_i = A_bar_i.to(torch.float32)  # [B, S, G, N]
@@ -352,7 +364,8 @@ class ComplexMamba3Layer(nn.Module):
         # For complex Gaussian z, |z|² ~ Exp(1/2σ²). The CDF 1-exp(-|z|²·β)
         # gives uniformly distributed gate values, maximizing gradient information.
         mag_sq = x.real**2 + x.imag**2  # |z|^2
-        gate = 1.0 - torch.exp(-mag_sq * self.activation_threshold.exp())
+        beta = self.activation_threshold.clamp(max=10.0).exp()
+        gate = -torch.expm1(-mag_sq * beta)
         x = x * gate  # phase preserved, χ²-matched gate
 
         # Reshape for MIMO SSM

@@ -40,7 +40,9 @@ class MESHEncoder(nn.Module):
         sinkhorn_epsilon: float = 0.05,
         sinkhorn_max_iter: int = 50,
         sinkhorn_tol: float = 1e-3,
-        sinkhorn_auto_epsilon: bool = False,
+        # SEOP audit (MESHEncoder): default fixed-ε yields near-max-entropy transport plans at init.
+        # Enable auto-ε by default so ε adapts to the cost scale and produces sharper, informative T.
+        sinkhorn_auto_epsilon: bool = True,
         sinkhorn_auto_epsilon_scale: float = 0.05,
         max_seq_length: int = 2048,
         low_vram_mode: bool = False,
@@ -56,6 +58,9 @@ class MESHEncoder(nn.Module):
         self.soft_sparse = soft_sparse
         self.soft_sparse_temp = soft_sparse_temp
         self.simple_mode = simple_mode
+
+        # Keep attributes initialized for type checkers.
+        self._last_sdr_sparse: Optional[Tensor] = None
 
         # Token embedding (real-valued)
         # SEOP Fix 52: Scale init to N(0, 1/√D) for weight tying compatibility.
@@ -73,6 +78,9 @@ class MESHEncoder(nn.Module):
             nn.init.xavier_uniform_(
                 self.imag_proj.weight, gain=0.3
             )  # Small Im channel — let model learn phase magnitude
+
+            # For type checkers: positional_phase is unused in simple_mode (forward returns early).
+            self.positional_phase = torch.empty(0)
         else:
             # Cost matrix module
             self.cost = LearnedCostMatrix(hidden_dim, sdr_candidates)
@@ -87,6 +95,9 @@ class MESHEncoder(nn.Module):
 
             # Projection from SDR candidates back to hidden_dim
             self.sdr_to_hidden = nn.Linear(sdr_candidates, hidden_dim)
+            # SEOP audit (MESHEncoder): default Linear bias O(1) can dominate OT signal O(1/K).
+            # Zero-init bias so token-dependent transport plan drives the initial hidden projection.
+            nn.init.zeros_(self.sdr_to_hidden.bias)
 
             # Positional phase encoding for complex lift
             self.register_buffer(
@@ -132,7 +143,7 @@ class MESHEncoder(nn.Module):
             return safe_complex(x, x_imag)
 
         # Step 2: Compute cost matrix
-        C = self.cost(x)  # [B, S, sdr_candidates]
+        cost = self.cost(x)  # [B, S, sdr_candidates]
 
         if token_freqs is not None:
             if token_freqs.dim() == 1:
@@ -141,15 +152,15 @@ class MESHEncoder(nn.Module):
                 f = torch.gather(token_freqs, 1, token_ids)
 
             weight = 1.0 / torch.log(f + math.e)
-            C = C * weight.unsqueeze(-1)
+            cost = cost * weight.unsqueeze(-1)
 
         # Step 3: Sinkhorn optimal transport
 
-        if self.low_vram_mode and C.device.type == "xpu":
-            C_cpu = C.float().cpu()
-            T = self.sinkhorn(C_cpu).to(C.device)
+        if self.low_vram_mode and cost.device.type == "xpu":
+            cost_cpu = cost.float().cpu()
+            transport = self.sinkhorn(cost_cpu).to(cost.device)
         else:
-            T = self.sinkhorn(C)  # [B, S, sdr_candidates]
+            transport = self.sinkhorn(cost)  # [B, S, sdr_candidates]
 
         # Step 4: SEOP Fix 44 — Soft-sparse option preserves gradient flow
         # Hard top-k zeros 87.5% of dimensions, destroying Gaussian tail information.
@@ -160,21 +171,28 @@ class MESHEncoder(nn.Module):
         # SEOP Fix 44: soft_sparse=True uses temperature-scaled softmax instead:
         # T_weights = softmax(|T| / τ) keeps all dimensions active with varying weight.
         # This prevents zero gradients and preserves Gaussian tail information.
-        T_abs = T.abs()
+        T_abs = transport.abs()
 
         if self.soft_sparse:
             # Soft-sparse: temperature-scaled attention weighting (all dims active)
             T_weights = torch.softmax(T_abs / self.soft_sparse_temp, dim=-1)
-            T_sparse = T * T_weights
+            T_sparse = transport * T_weights
+
+            # SEOP audit (MESHEncoder): softmax weights are ~1/K when T is near-uniform at init,
+            # which scales the transport plan by ~1/K and drowns the OT signal.
+            # Preserve original row sums after weighting to keep mass comparable to the OT output.
+            original_row_sum = T_abs.sum(dim=-1, keepdim=True).clamp(min=1e-12)
+            new_row_sum = T_sparse.abs().sum(dim=-1, keepdim=True).clamp(min=1e-12)
+            T_sparse = T_sparse * (original_row_sum / new_row_sum)
         else:
             # Hard sparse: original top-k sparsification
             topk_vals, topk_idx = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
             tau = topk_vals[..., -1:]
-            T_sparse = torch.sign(T) * torch.relu(T_abs - tau)
+            T_sparse = torch.sign(transport) * torch.relu(T_abs - tau)
             fallback = T_sparse.abs().sum(dim=-1, keepdim=True) <= 1e-12
             if fallback.any():
                 mask = torch.zeros_like(T_abs).scatter(-1, topk_idx, 1.0)
-                T_sparse = torch.where(fallback, T * mask, T_sparse)
+                T_sparse = torch.where(fallback, transport * mask, T_sparse)
 
         self._last_sdr_sparse = T_sparse.detach()
 

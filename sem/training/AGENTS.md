@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
+<!-- Generated: 2026-02-03 | Updated: 2026-02-08 -->
 
 # training
 
@@ -14,12 +14,12 @@ Training infrastructure including PyTorch Lightning module, custom callbacks, le
 | `__init__.py` | Module exports |
 | `lightning_module.py` | `SEMLightningModule` - main Lightning training module |
 | `trainer.py` | `SEMTrainer` - standalone trainer (non-Lightning) |
-| `callbacks.py` | `CurriculumCallback`, `HealthCheckCallback`, etc. |
+| `callbacks.py` | Lightning callbacks: `SEMConsoleLogger`, `SEMCurriculumCallback`, `SEMHealthCallback`, wandb helpers |
 | `scheduler.py` | `WSDScheduler` - warmup-stable-decay learning rate schedule |
 | `curriculum.py` | `CurriculumManager` - progressive training stages |
 | `distillation.py` | `EMATeacher` - self-distillation with EMA teacher |
-| `checkpoint.py` | Checkpoint saving/loading utilities |
-| `health.py` | `HealthMonitor` - training health metrics and alerts |
+| `checkpoint.py` | `CheckpointManager` - save/load + retention policy |
+| `health.py` | `HealthMonitor` - training health metrics + NaN/grad checks |
 | `precision_plugin.py` | `CustomMixedPrecisionPlugin` - XPU-safe mixed precision |
 | `xpu_accelerator.py` | `XPUAccelerator` - Intel XPU support for Lightning |
 
@@ -30,6 +30,7 @@ Training infrastructure including PyTorch Lightning module, custom callbacks, le
 - **Lightning module**: `SEMLightningModule` is the main training interface
 - **Callbacks**: Curriculum, health checks, gradient monitoring
 - **XPU support**: Custom accelerator and precision plugin
+- **Gradient checkpointing**: optional monkey-patching in `SEMLightningModule.__init__` (see config)
 
 ### Key Components
 
@@ -45,7 +46,7 @@ class SEMLightningModule(LightningModule):
     - Health monitoring
     """
 
-class CurriculumCallback(Callback):
+class SEMCurriculumCallback(Callback):
     """Progressive training with increasing sequence length.
 
     Stages:
@@ -89,7 +90,7 @@ uv run pytest tests/test_integration.py -v
 - `../data/` - Data loading
 
 ### External
-- `lightning` - Training framework
+- `pytorch-lightning` - Training framework (LightningModule, callbacks)
 - `wandb` - Experiment tracking (optional)
 - `torch.optim` - Optimizers
 

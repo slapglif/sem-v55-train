@@ -39,7 +39,9 @@ class EngramConfig:
     """
 
     tokenizer: Any = None
-    engram_vocab_size: list[int] = field(default_factory=lambda: [129280 * 5, 129280 * 5])
+    engram_vocab_size: list[int] = field(
+        default_factory=lambda: [129280 * 5, 129280 * 5]
+    )
     max_ngram_size: int = 3
     n_embed_per_ngram: int = 512
     n_head_per_ngram: int = 8
@@ -101,7 +103,9 @@ class ShortConv(nn.Module):
         )
 
         # RMSNorm for each channel
-        self.norms = nn.ModuleList([nn.RMSNorm(hidden_size, eps=norm_eps) for _ in range(hc_mult)])
+        self.norms = nn.ModuleList(
+            [nn.RMSNorm(hidden_size, eps=norm_eps) for _ in range(hc_mult)]
+        )
 
         if self.activation:
             self.act_fn = nn.SiLU()
@@ -165,6 +169,14 @@ class Engram(nn.Module):
         gate_logits: Learned per-channel scalar gates (logits)
     """
 
+    # [SEOP] Cross-layer CPU hash caching.
+    # Hashing runs in NumPy on CPU; if repeated per Engram call it forces a GPU->CPU sync
+    # and stalls the forward pass (entropy transfer collapses to a host roundtrip).
+    # We keep a single-entry cache shared across Engram instances so multiple Engram
+    # layers in the same model forward can reuse the same CPU hash results.
+    _global_hash_cache_key: Optional[tuple[Any, ...]] = None
+    _global_hash_cache_val: Optional[dict[int, Tensor]] = None
+
     def __init__(
         self,
         layer_id: int,
@@ -182,6 +194,11 @@ class Engram(nn.Module):
         self.layer_id = layer_id
         self.hidden_size = hidden_size
         self.hc_mult = config.hc_mult
+
+        # [SEOP] Phase-preserving complex injection is default-on.
+        # Engram itself produces real-valued augmentation; downstream integration should
+        # modulate complex magnitude without breaking global-phase symmetry.
+        self.phase_preserving = True
 
         if config.tokenizer is None:
             raise ValueError("EngramConfig.tokenizer must be provided")
@@ -227,12 +244,52 @@ class Engram(nn.Module):
         # Initialize at 0.0 so sigmoid gives 0.5 (moderate mixing)
         self.gate_logits = nn.Parameter(torch.zeros(config.hc_mult))
 
+        # [SEOP] Cache hash results to avoid repeated GPU->CPU sync.
+        # Per-instance cache holds the device-resident hash IDs for this layer.
+        # Keyed by tensor identity + pointer + shape to avoid recomputing when the same
+        # input_ids are reused (e.g., across multiple Engram layers / recomputation).
+        self._hash_cache_key: Optional[tuple[Any, ...]] = None
+        self._hash_cache_val: Optional[Tensor] = None
+
+    def inject_into_complex(self, psi: Tensor, engram_out: Tensor) -> Tensor:
+        """Inject Engram output into a complex state.
+
+        Phase-preserving injection modulates magnitude without breaking complex phase.
+
+        Notes:
+            - [SEOP] Preserving global-phase symmetry avoids injecting information into
+              only one quadrature (real) which can create systematic phase bias.
+            - The legacy behavior (real-only injection) is kept for backward compatibility
+              when `self.phase_preserving` is disabled.
+
+        Args:
+            psi: Complex tensor state, e.g. [B, L, D] complex.
+            engram_out: Real-valued augmentation, broadcastable to psi.real.
+
+        Returns:
+            Complex tensor with Engram injection applied.
+        """
+        if not self.phase_preserving:
+            # Legacy: add to real part only (breaks Re/Im symmetry).
+            return torch.complex(psi.real + engram_out, psi.imag)
+
+        # Phase-preserving: scale magnitude along psi direction.
+        # psi_out = psi * (1 + engram_out / (|psi| + eps))
+        mag = psi.abs().clamp(min=1e-8)
+        scale = 1.0 + engram_out / mag
+        return psi * scale
+
     def forward(self, hidden_states: Tensor, input_ids: Tensor) -> Tensor:
         """Apply Engram augmentation to hidden states.
 
         Args:
             hidden_states: [B, L, D] encoder output (REAL tensor, not complex)
             input_ids: [B, L] token IDs
+
+        Notes:
+            - [SEOP] `hidden_states` is used for device placement only.
+              Engram computation is conditioned solely on `input_ids` via hash-based
+              n-gram addressing (it is intentionally unconditional on activations).
 
         Returns:
             output: [B, L, D] augmented hidden states (REAL tensor)
@@ -241,9 +298,29 @@ class Engram(nn.Module):
 
         # Generate n-gram hash IDs
         # hash_input_ids: [B, L, num_heads_total]
-        hash_input_ids = torch.from_numpy(
-            self.hash_mapping.hash(input_ids.cpu().numpy())[self.layer_id]
-        ).to(hidden_states.device)
+        # [SEOP] Avoid repeated NumPy hashing + device sync.
+        # Hashing requires `input_ids.cpu().numpy()` which can force a GPU->CPU sync.
+        # We cache the *CPU* hash results globally (shared across Engram instances) and
+        # cache the *device* tensor per instance.
+        cache_key = (id(input_ids), input_ids.data_ptr(), input_ids.shape)
+        if Engram._global_hash_cache_key != cache_key:
+            # NOTE: NgramHashMapping.hash() is expected to return a dict keyed by layer_id.
+            hash_out = self.hash_mapping.hash(input_ids.cpu().numpy())
+            Engram._global_hash_cache_val = {
+                k: torch.from_numpy(v) for k, v in hash_out.items()
+            }
+            Engram._global_hash_cache_key = cache_key
+
+        local_cache_key = (cache_key, hidden_states.device)
+        if self._hash_cache_key != local_cache_key:
+            cached = Engram._global_hash_cache_val
+            assert cached is not None
+            cpu_hash_ids = cached[self.layer_id]
+            self._hash_cache_val = cpu_hash_ids.to(hidden_states.device)
+            self._hash_cache_key = local_cache_key
+
+        hash_input_ids = self._hash_cache_val
+        assert hash_input_ids is not None
 
         # Lookup embeddings and flatten across heads
         # embeddings: [B, L, num_heads_total, D_per_head]
@@ -255,11 +332,18 @@ class Engram(nn.Module):
 
         # Expand to hc_mult channels with learned gates
         # gate_logits: [hc_mult] learned parameters, sigmoid gives (0,1) range
+        # [SEOP] Scalar per-channel gates are intentionally non-adaptive (position-independent).
+        # Per-token gates would require computing attention/MLP over hash embeddings, adding
+        # O(T*D) cost and extra memory traffic; the scalar gate is a coarse, fast on/off switch.
         gates = torch.sigmoid(self.gate_logits)  # [hc_mult]
 
         # Expand value to [B, L, hc_mult, D] and apply gates
-        value_expanded = value.unsqueeze(2).expand(-1, -1, self.hc_mult, -1)  # [B, L, hc_mult, D]
-        gated_value = value_expanded * gates.view(1, 1, self.hc_mult, 1)  # [B, L, hc_mult, D]
+        value_expanded = value.unsqueeze(2).expand(
+            -1, -1, self.hc_mult, -1
+        )  # [B, L, hc_mult, D]
+        gated_value = value_expanded * gates.view(
+            1, 1, self.hc_mult, 1
+        )  # [B, L, hc_mult, D]
 
         # Short convolution for local smoothing
         output = gated_value + self.short_conv(gated_value)  # [B, L, hc_mult, D]

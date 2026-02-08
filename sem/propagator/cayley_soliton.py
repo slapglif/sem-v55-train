@@ -19,7 +19,7 @@ linear diffusion (Step 2).
 """
 
 import time
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -82,7 +82,7 @@ class CayleySolitonPropagator(nn.Module):
         self._cg_skip_count: int = 0
         self._cg_total_count: int = 0
         self.timing_enabled: bool = False
-        self._timing_stats: dict = {}
+        self._timing_stats: dict[str, Any] = {}
 
         # SEOP Fix 9: Per-dimension Kerr coefficient
         # Scalar α applies uniform nonlinear coupling to all feature channels.
@@ -173,6 +173,19 @@ class CayleySolitonPropagator(nn.Module):
                 return (vr + half_dt * Hvi, vi - half_dt * Hvr)
 
             def a_minus_matvec(v_pair):
+                """Apply (I + i*dt/2*H) in real-block form.
+
+                For symmetric H (graph Laplacian), the complex operator A = I + i*d*H
+                is normal: A^H A = I + d^2 H^2, so it is invertible and typically
+                well-conditioned. In real-block coordinates (vr, vi), the matrix is:
+
+                    [[I, -d*H],
+                     [d*H,  I]]
+
+                which is not symmetric in the standard Euclidean inner product.
+                Vanilla CG therefore has no formal SPD guarantee here; we rely on a
+                block-Jacobi preconditioner and residual monitoring/fallback.
+                """
                 vr, vi = v_pair
                 Hvr, Hvi = self.hamiltonian.matvec_real_fused(vr, vi)
                 return (vr - half_dt * Hvi, vi + half_dt * Hvr)
@@ -192,10 +205,10 @@ class CayleySolitonPropagator(nn.Module):
                 A_plus = I + 1j * half_dt * H
                 rhs = torch.complex(rhs_r, rhs_i)
                 # Reshape for batch processing: [B, S, D] -> [B*S, D]
-                B, S, _ = rhs.shape
-                rhs_flat = rhs.reshape(B * S, D)
+                batch_size, seq_len, _ = rhs.shape
+                rhs_flat = rhs.reshape(batch_size * seq_len, D)
                 psi_out_flat = torch.linalg.solve(A_plus, rhs_flat.T).T
-                psi_out = psi_out_flat.reshape(B, S, D)
+                psi_out = psi_out_flat.reshape(batch_size, seq_len, D)
                 self._psi_cache = psi_out.detach().clone()
 
                 self.hamiltonian.clear_cache()
@@ -211,6 +224,16 @@ class CayleySolitonPropagator(nn.Module):
                 return psi_out
 
             def a_minus_matvec_wrapped(v_real_block):
+                """matvec wrapper for CG in real-block representation.
+
+                The CG solver operates on tensors shaped [..., D, 2] where the last
+                dimension stores (real, imag). This wrapper maps that real-block
+                tensor through the Cayley system operator (I + i*dt/2*H).
+
+                The resulting real-block operator is invertible but not symmetric;
+                CG is used pragmatically with preconditioning and a residual-based
+                safety fallback in `sem.propagator.cg_solver.cg_solve_sparse`.
+                """
                 vr, vi = v_real_block.unbind(-1)
                 out_r, out_i = a_minus_matvec((vr, vi))
                 return torch.stack([out_r, out_i], dim=-1)
@@ -228,11 +251,15 @@ class CayleySolitonPropagator(nn.Module):
                 out_i = (d_k * vr + vi) * inv_s2
                 return torch.stack([out_r, out_i], dim=-1)
 
-            B, S, _ = rhs_r.shape
+            batch_size, seq_len, _ = rhs_r.shape
             rhs_real_block = torch.stack([rhs_r, rhs_i], dim=-1).reshape(-1, D, 2)
 
             x0 = None
-            if self._psi_cache is not None and self._psi_cache.shape == (B, S, D):
+            if self._psi_cache is not None and self._psi_cache.shape == (
+                batch_size,
+                seq_len,
+                D,
+            ):
                 x0 = torch.view_as_real(self._psi_cache).reshape(-1, D, 2)
                 if _t:
                     self._timing_stats["cache_hits"] = (
@@ -290,7 +317,9 @@ class CayleySolitonPropagator(nn.Module):
                         _cg_mod._last_cg_iterations
                     )
 
-            psi_out = torch.view_as_complex(psi_out_real_block.reshape(B, S, D, 2))
+            psi_out = torch.view_as_complex(
+                psi_out_real_block.reshape(batch_size, seq_len, D, 2)
+            )
             self._psi_cache = psi_out.detach().clone()
 
             self.hamiltonian.clear_cache()
@@ -378,8 +407,8 @@ class CayleySolitonStack(nn.Module):
         for layer in self.layers:
             cast(CayleySolitonPropagator, layer).timing_enabled = enabled
 
-    def collect_and_clear_timing(self) -> dict:
-        merged: dict = {}
+    def collect_and_clear_timing(self) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
         for layer in self.layers:
             prop = cast(CayleySolitonPropagator, layer)
             stats = prop._timing_stats

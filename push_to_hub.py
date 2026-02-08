@@ -38,6 +38,7 @@ include_dirs = [
     "sem",
     "configs",
     "tokenizer",
+    "sweep",
 ]
 
 with tempfile.TemporaryDirectory() as tmpdir:
