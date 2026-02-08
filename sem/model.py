@@ -529,6 +529,8 @@ class SEMModel(nn.Module):
             cg_tol_late=c.propagator.cg_tol_late,
             cg_tol_warmup_end=c.propagator.cg_tol_warmup_end,
             cg_tol_mid_end=c.propagator.cg_tol_mid_end,
+            use_chebyshev_kpm=c.propagator.use_chebyshev_kpm,
+            chebyshev_degree=c.propagator.chebyshev_degree,
         )
 
         # 5. Final normalization before collapse
