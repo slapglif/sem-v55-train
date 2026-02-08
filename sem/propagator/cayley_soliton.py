@@ -207,7 +207,13 @@ class CayleySolitonPropagator(nn.Module):
                 # Reshape for batch processing: [B, S, D] -> [B*S, D]
                 batch_size, seq_len, _ = rhs.shape
                 rhs_flat = rhs.reshape(batch_size * seq_len, D)
-                psi_out_flat = torch.linalg.solve(A_plus, rhs_flat.T).T
+                try:
+                    psi_out_flat = torch.linalg.solve(A_plus, rhs_flat.T).T
+                except torch._C._LinAlgError:
+                    A_jittered = A_plus + 1e-6 * torch.eye(
+                        D, dtype=A_plus.dtype, device=A_plus.device
+                    )
+                    psi_out_flat = torch.linalg.solve(A_jittered, rhs_flat.T).T
                 psi_out = psi_out_flat.reshape(batch_size, seq_len, D)
                 self._psi_cache = psi_out.detach().clone()
 

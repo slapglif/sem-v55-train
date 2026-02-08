@@ -220,6 +220,7 @@ def main():
         ),
         n_trials=args.n_trials,
         show_progress_bar=True,
+        catch=(Exception,),
     )
 
     print("\n" + "=" * 60)
