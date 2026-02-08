@@ -9,6 +9,8 @@ Usage:
     uv run python sweep/hyperparam_sweep.py --n-trials 100 --n-steps 200 --device cuda
 """
 
+# pyright: reportMissingTypeArgument=false
+
 import argparse
 import time
 from pathlib import Path
@@ -52,17 +54,91 @@ def _round_sig(x: float, sig: int = 2) -> float:
 
 def make_config(trial: optuna.Trial) -> SEMConfig:
     # Round all floats to 2 sig figs — the model can't distinguish more
-    lr = _round_sig(trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True))
-    gradient_clip = round(
-        trial.suggest_float("gradient_clip", 1.0, 20.0)
-    )  # integer steps
-    weight_decay = _round_sig(trial.suggest_float("weight_decay", 1e-4, 0.1, log=True))
-    unitary_lambda = _round_sig(
-        trial.suggest_float("unitary_lambda", 0.001, 0.1, log=True)
+
+    # -----------------------------
+    # TrainingConfig (search)
+    # -----------------------------
+    learning_rate = _round_sig(
+        trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
     )
+    weight_decay = _round_sig(trial.suggest_float("weight_decay", 1e-4, 0.1, log=True))
     encoder_lr_scale = _round_sig(
         trial.suggest_float("encoder_lr_scale", 0.001, 0.1, log=True)
     )
+    gradient_clip = _round_sig(trial.suggest_float("gradient_clip", 1.0, 20.0))
+    unitary_lambda = _round_sig(
+        trial.suggest_float("unitary_lambda", 0.001, 0.1, log=True)
+    )
+    unitary_clamp_min = _round_sig(
+        trial.suggest_float("unitary_clamp_min", 1e-4, 1e-2, log=True)
+    )
+    unitary_clamp_max = _round_sig(
+        trial.suggest_float("unitary_clamp_max", 1.0, 100.0, log=True)
+    )
+    label_smoothing = _round_sig(trial.suggest_float("label_smoothing", 0.0, 0.15))
+
+    # -----------------------------
+    # EncoderConfig (search)
+    # -----------------------------
+    sdr_sparsity = trial.suggest_categorical("sdr_sparsity", [8, 16, 24, 32])
+    sdr_candidates = trial.suggest_categorical("sdr_candidates", [32, 64, 128])
+    sinkhorn_epsilon = _round_sig(
+        trial.suggest_float("sinkhorn_epsilon", 0.01, 0.2, log=True)
+    )
+    sinkhorn_max_iter = trial.suggest_int("sinkhorn_max_iter", 20, 100, step=10)
+    sinkhorn_auto_epsilon = trial.suggest_categorical(
+        "sinkhorn_auto_epsilon", [True, False]
+    )
+    sinkhorn_auto_epsilon_scale = 0.05
+    if sinkhorn_auto_epsilon:
+        sinkhorn_auto_epsilon_scale = _round_sig(
+            trial.suggest_float("sinkhorn_auto_epsilon_scale", 0.01, 0.2, log=True)
+        )
+
+    soft_sparse = trial.suggest_categorical("soft_sparse", [True, False])
+    soft_sparse_temp = 0.1
+    if soft_sparse:
+        soft_sparse_temp = _round_sig(
+            trial.suggest_float("soft_sparse_temp", 0.01, 1.0, log=True)
+        )
+
+    # -----------------------------
+    # SpinorConfig (search)
+    # -----------------------------
+    block_size = 8  # fixed (architecture)
+    hidden_dim = SMALL_MODEL["hidden_dim"]
+    num_blocks = hidden_dim // block_size
+
+    memory_horizon_ratio = _round_sig(
+        trial.suggest_float("memory_horizon_ratio", 0.0, 0.5)
+    )
+
+    # -----------------------------
+    # PropagatorConfig (search)
+    # -----------------------------
+    cayley_dt = _round_sig(trial.suggest_float("cayley_dt", 0.01, 0.5, log=True))
+    nonlinear_alpha = _round_sig(
+        trial.suggest_float("nonlinear_alpha", 0.01, 0.5, log=True)
+    )
+    laplacian_sparsity = trial.suggest_int("laplacian_sparsity", 3, 7)
+    pit_gamma = _round_sig(trial.suggest_float("pit_gamma", 0.01, 2.0))
+    chebyshev_degree = trial.suggest_categorical(
+        "chebyshev_degree", [6, 8, 12, 16, 20, 24]
+    )
+
+    # -----------------------------
+    # SamplerConfig (search)
+    # -----------------------------
+    temperature = _round_sig(trial.suggest_float("temperature", 0.5, 2.0))
+    top_k = trial.suggest_int("top_k", 10, 100, step=10)
+    top_p = _round_sig(trial.suggest_float("top_p", 0.8, 1.0))
+
+    # -----------------------------
+    # V8Config (all features ON; search parameters)
+    # -----------------------------
+    mhc_streams = trial.suggest_categorical("mhc_streams", [2, 4, 8])
+    mhc_num_iters = trial.suggest_categorical("mhc_num_iters", [5, 10, 20])
+    mhc_tau = _round_sig(trial.suggest_float("mhc_tau", 0.01, 0.2, log=True))
 
     lindblad_gamma = _round_sig(
         trial.suggest_float("lindblad_gamma", 0.001, 0.1, log=True)
@@ -75,40 +151,61 @@ def make_config(trial: optuna.Trial) -> SEMConfig:
         trial.suggest_float("condition_threshold", 10.0, 1000.0, log=True)
     )
 
-    cayley_dt = _round_sig(trial.suggest_float("cayley_dt", 0.01, 0.5, log=True))
-    pit_gamma = round(
-        trial.suggest_float("pit_gamma", 0.01, 2.0), 2
-    )  # 2 decimal places
-
-    sdr_sparsity = trial.suggest_int("sdr_sparsity", 8, 32, step=8)
-
     return SEMConfig(
-        model=ModelConfig(**SMALL_MODEL),
-        encoder=EncoderConfig(sdr_sparsity=sdr_sparsity, sdr_candidates=64),
+        model=ModelConfig(
+            hidden_dim=SMALL_MODEL["hidden_dim"],
+            num_layers=SMALL_MODEL["num_layers"],
+            vocab_size=SMALL_MODEL["vocab_size"],
+            max_seq_length=SMALL_MODEL["max_seq_length"],
+        ),
+        encoder=EncoderConfig(
+            sdr_sparsity=sdr_sparsity,
+            sdr_candidates=sdr_candidates,
+            sinkhorn_epsilon=sinkhorn_epsilon,
+            sinkhorn_max_iter=sinkhorn_max_iter,
+            sinkhorn_auto_epsilon=sinkhorn_auto_epsilon,
+            sinkhorn_auto_epsilon_scale=sinkhorn_auto_epsilon_scale,
+            soft_sparse=soft_sparse,
+            soft_sparse_temp=soft_sparse_temp,
+        ),
         spinor=SpinorConfig(
-            block_size=8, num_blocks=16, state_dim=32, mimo_groups=4, d_conv=4
+            block_size=block_size,
+            num_blocks=num_blocks,
+            state_dim=64,
+            mimo_groups=8,
+            d_conv=4,
+            memory_horizon_ratio=memory_horizon_ratio,
         ),
         propagator=PropagatorConfig(
             cayley_dt=cayley_dt,
-            cg_max_iter=10,
-            laplacian_sparsity=5,
-            direct_solve=True,
+            cg_max_iter=5,
+            nonlinear_alpha=nonlinear_alpha,
+            laplacian_sparsity=laplacian_sparsity,
             pit_gamma=pit_gamma,
+            use_chebyshev_kpm=True,
+            chebyshev_degree=chebyshev_degree,
+            direct_solve=False,
         ),
-        sampler=SamplerConfig(),
+        sampler=SamplerConfig(temperature=temperature, top_k=top_k, top_p=top_p),
         training=TrainingConfig(
-            learning_rate=lr,
+            learning_rate=learning_rate,
             gradient_clip=gradient_clip,
             weight_decay=weight_decay,
             unitary_lambda=unitary_lambda,
+            unitary_clamp_min=unitary_clamp_min,
+            unitary_clamp_max=unitary_clamp_max,
             encoder_lr_scale=encoder_lr_scale,
             warmup_steps=0,
+            label_smoothing=label_smoothing,
         ),
         v8=V8Config(
             use_lindblad=True,
             use_hybrid_automata=True,
             use_quaternionic=True,
             use_mhc=True,
+            mhc_streams=mhc_streams,
+            mhc_num_iters=mhc_num_iters,
+            mhc_tau=mhc_tau,
             lindblad_gamma=lindblad_gamma,
             num_lindblad_ops=num_lindblad_ops,
             curvature_threshold=curvature_threshold,
@@ -254,6 +351,11 @@ def main():
         lr = t.params.get("learning_rate", "?")
         gc = t.params.get("gradient_clip", "?")
         print(f"  #{i + 1}: loss={t.value:.4f}, lr={lr:.2e}, clip={gc:.1f}")
+        params_str = ", ".join(
+            f"{k}={_round_sig(v) if isinstance(v, float) else v}"
+            for k, v in sorted(t.params.items())
+        )
+        print(f"    {params_str}")
 
 
 if __name__ == "__main__":

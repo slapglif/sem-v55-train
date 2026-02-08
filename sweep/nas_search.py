@@ -9,8 +9,11 @@ Usage:
     uv run python sweep/nas_search.py --n-trials 200 --n-steps 200 --device cuda
 """
 
+from __future__ import annotations
+
 import argparse
 import time
+from typing import Any
 
 import optuna
 import torch
@@ -42,58 +45,185 @@ def _round_sig(x: float, sig: int = 2) -> float:
 
 
 def make_config(trial: optuna.Trial) -> SEMConfig:
-    hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
+    # Architecture
+    hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256, 512])
     num_layers = trial.suggest_int("num_layers", 2, 8, step=2)
-    state_dim = trial.suggest_categorical("state_dim", [16, 32, 64])
-    mimo_groups = trial.suggest_categorical("mimo_groups", [2, 4, 8])
-    block_size = trial.suggest_categorical("block_size", [4, 8, 16])
-    d_conv = trial.suggest_int("d_conv", 2, 4)
+    vocab_size = 1000
+    max_seq_length = 128
 
+    # Encoder
     sdr_sparsity = trial.suggest_int("sdr_sparsity", 8, 32, step=8)
     sdr_candidates = trial.suggest_categorical("sdr_candidates", [32, 64, 128])
+    sinkhorn_epsilon = _round_sig(
+        trial.suggest_float("sinkhorn_epsilon", 0.01, 0.2, log=True)
+    )
+    sinkhorn_max_iter = trial.suggest_int("sinkhorn_max_iter", 20, 100, step=10)
+    sinkhorn_auto_epsilon = trial.suggest_categorical(
+        "sinkhorn_auto_epsilon", [True, False]
+    )
+    if sinkhorn_auto_epsilon:
+        sinkhorn_auto_epsilon_scale = _round_sig(
+            trial.suggest_float("sinkhorn_auto_epsilon_scale", 0.01, 0.2, log=True)
+        )
+    else:
+        sinkhorn_auto_epsilon_scale = EncoderConfig().sinkhorn_auto_epsilon_scale
 
+    soft_sparse = trial.suggest_categorical("soft_sparse", [True, False])
+    if soft_sparse:
+        soft_sparse_temp = _round_sig(
+            trial.suggest_float("soft_sparse_temp", 0.01, 1.0, log=True)
+        )
+    else:
+        soft_sparse_temp = EncoderConfig().soft_sparse_temp
+
+    # Spinor
+    block_size = trial.suggest_categorical("block_size", [4, 8, 16])
+    state_dim = trial.suggest_categorical("state_dim", [16, 32, 64])
+    mimo_groups = trial.suggest_categorical("mimo_groups", [2, 4, 8])
+    d_conv = trial.suggest_categorical("d_conv", [2, 4])
+    memory_horizon_ratio = _round_sig(
+        trial.suggest_float("memory_horizon_ratio", 0.0, 0.5)
+    )
+
+    # Propagator
+    cayley_dt = _round_sig(trial.suggest_float("cayley_dt", 0.01, 0.5, log=True))
+    nonlinear_alpha = _round_sig(
+        trial.suggest_float("nonlinear_alpha", 0.01, 0.5, log=True)
+    )
+    laplacian_sparsity = trial.suggest_int("laplacian_sparsity", 3, 7)
+    pit_gamma = _round_sig(trial.suggest_float("pit_gamma", 0.01, 2.0))
+    use_chebyshev_kpm = trial.suggest_categorical("use_chebyshev_kpm", [True, False])
+    if use_chebyshev_kpm:
+        chebyshev_degree = trial.suggest_categorical(
+            "chebyshev_degree", [6, 8, 12, 16, 20, 24]
+        )
+        direct_solve = False
+    else:
+        chebyshev_degree = PropagatorConfig().chebyshev_degree
+        direct_solve = True
+
+    # Sampler
+    temperature = _round_sig(trial.suggest_float("temperature", 0.5, 2.0))
+    top_k = trial.suggest_int("top_k", 10, 100, step=10)
+    top_p = _round_sig(trial.suggest_float("top_p", 0.8, 1.0))
+
+    # Training
+    learning_rate = _round_sig(
+        trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
+    )
+    weight_decay = _round_sig(trial.suggest_float("weight_decay", 1e-4, 0.1, log=True))
+    encoder_lr_scale = _round_sig(
+        trial.suggest_float("encoder_lr_scale", 0.001, 0.1, log=True)
+    )
+    gradient_clip = _round_sig(trial.suggest_float("gradient_clip", 1.0, 20.0))
+    unitary_lambda = _round_sig(
+        trial.suggest_float("unitary_lambda", 0.001, 0.1, log=True)
+    )
+    unitary_clamp_min = _round_sig(
+        trial.suggest_float("unitary_clamp_min", 1e-4, 1e-2, log=True)
+    )
+    unitary_clamp_max = _round_sig(
+        trial.suggest_float("unitary_clamp_max", 1.0, 100.0, log=True)
+    )
+    label_smoothing = _round_sig(trial.suggest_float("label_smoothing", 0.0, 0.15))
+
+    # V8
     use_lindblad = trial.suggest_categorical("use_lindblad", [True, False])
     use_hybrid = trial.suggest_categorical("use_hybrid_automata", [True, False])
     use_quat = trial.suggest_categorical("use_quaternionic", [True, False])
     use_mhc = trial.suggest_categorical("use_mhc", [True, False])
 
-    cayley_dt = _round_sig(trial.suggest_float("cayley_dt", 0.01, 0.5, log=True))
-    laplacian_sparsity = trial.suggest_int("laplacian_sparsity", 3, 7)
+    if use_mhc:
+        mhc_streams = trial.suggest_categorical("mhc_streams", [2, 4, 8])
+        mhc_num_iters = trial.suggest_categorical("mhc_num_iters", [5, 10, 20])
+        mhc_tau = _round_sig(trial.suggest_float("mhc_tau", 0.01, 0.2, log=True))
+    else:
+        mhc_streams = V8Config().mhc_streams
+        mhc_num_iters = V8Config().mhc_num_iters
+        mhc_tau = V8Config().mhc_tau
+
+    if use_lindblad:
+        lindblad_gamma = _round_sig(
+            trial.suggest_float("lindblad_gamma", 0.001, 0.1, log=True)
+        )
+        num_lindblad_ops = trial.suggest_int("num_lindblad_ops", 2, 8)
+    else:
+        lindblad_gamma = V8Config().lindblad_gamma
+        num_lindblad_ops = V8Config().num_lindblad_ops
+
+    if use_hybrid:
+        curvature_threshold = _round_sig(
+            trial.suggest_float("curvature_threshold", 0.01, 1.0, log=True)
+        )
+    else:
+        curvature_threshold = V8Config().curvature_threshold
+
+    if use_quat:
+        condition_threshold = _round_sig(
+            trial.suggest_float("condition_threshold", 10.0, 1000.0, log=True)
+        )
+    else:
+        condition_threshold = V8Config().condition_threshold
 
     return SEMConfig(
         model=ModelConfig(
             hidden_dim=hidden_dim,
             num_layers=num_layers,
-            vocab_size=1000,
-            max_seq_length=128,
+            vocab_size=vocab_size,
+            max_seq_length=max_seq_length,
         ),
-        encoder=EncoderConfig(sdr_sparsity=sdr_sparsity, sdr_candidates=sdr_candidates),
+        encoder=EncoderConfig(
+            sdr_sparsity=sdr_sparsity,
+            sdr_candidates=sdr_candidates,
+            sinkhorn_epsilon=sinkhorn_epsilon,
+            sinkhorn_max_iter=sinkhorn_max_iter,
+            sinkhorn_auto_epsilon=sinkhorn_auto_epsilon,
+            sinkhorn_auto_epsilon_scale=sinkhorn_auto_epsilon_scale,
+            soft_sparse=soft_sparse,
+            soft_sparse_temp=soft_sparse_temp,
+        ),
         spinor=SpinorConfig(
             block_size=block_size,
             num_blocks=hidden_dim // block_size,
             state_dim=state_dim,
             mimo_groups=mimo_groups,
             d_conv=d_conv,
+            memory_horizon_ratio=memory_horizon_ratio,
         ),
         propagator=PropagatorConfig(
             cayley_dt=cayley_dt,
             cg_max_iter=10,
+            nonlinear_alpha=nonlinear_alpha,
             laplacian_sparsity=laplacian_sparsity,
-            direct_solve=True,
-            pit_gamma=0.1,
+            direct_solve=direct_solve,
+            pit_gamma=pit_gamma,
+            use_chebyshev_kpm=use_chebyshev_kpm,
+            chebyshev_degree=chebyshev_degree,
         ),
-        sampler=SamplerConfig(),
+        sampler=SamplerConfig(temperature=temperature, top_k=top_k, top_p=top_p),
         training=TrainingConfig(
-            learning_rate=3e-4,
-            gradient_clip=5.0,
-            weight_decay=0.01,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            encoder_lr_scale=encoder_lr_scale,
+            gradient_clip=gradient_clip,
             warmup_steps=0,
+            unitary_lambda=unitary_lambda,
+            unitary_clamp_min=unitary_clamp_min,
+            unitary_clamp_max=unitary_clamp_max,
+            label_smoothing=label_smoothing,
         ),
         v8=V8Config(
             use_lindblad=use_lindblad,
             use_hybrid_automata=use_hybrid,
             use_quaternionic=use_quat,
             use_mhc=use_mhc,
+            mhc_streams=mhc_streams,
+            mhc_num_iters=mhc_num_iters,
+            mhc_tau=mhc_tau,
+            lindblad_gamma=lindblad_gamma,
+            num_lindblad_ops=num_lindblad_ops,
+            curvature_threshold=curvature_threshold,
+            condition_threshold=condition_threshold,
         ),
     )
 
@@ -105,7 +235,7 @@ def train_steps(
     batch_size: int,
     seq_len: int,
     device: str,
-) -> dict:
+) -> dict[str, Any]:
     model.train()
     model.propagator_enabled = True
 
@@ -231,21 +361,89 @@ def main():
     print(f"  Parameters: {best.user_attrs.get('param_count', 'N/A'):,}")
     print(f"  Loss reduction: {best.user_attrs.get('loss_reduction', 'N/A'):.1%}")
     print(f"  Steps/sec: {best.user_attrs.get('steps_per_sec', 'N/A'):.1f}")
+
+    hidden_dim = best.params.get("hidden_dim", 0)
+    block_size = best.params.get("block_size", 1)
+    num_blocks = hidden_dim // block_size if isinstance(hidden_dim, int) else "?"
+
+    use_chebyshev_kpm = best.params.get("use_chebyshev_kpm", None)
+    direct_solve = (
+        (not use_chebyshev_kpm) if isinstance(use_chebyshev_kpm, bool) else "?"
+    )
+
     print(f"\n  Architecture:")
+    for k in ["hidden_dim", "num_layers"]:
+        print(f"    {k}: {best.params.get(k, '?')}")
+    print("    vocab_size: 1000 (fixed)")
+    print("    max_seq_length: 128 (fixed)")
+
+    print(f"\n  Encoder:")
     for k in [
-        "hidden_dim",
-        "num_layers",
-        "state_dim",
-        "mimo_groups",
-        "block_size",
-        "d_conv",
+        "sdr_sparsity",
+        "sdr_candidates",
+        "sinkhorn_epsilon",
+        "sinkhorn_max_iter",
+        "sinkhorn_auto_epsilon",
+        "sinkhorn_auto_epsilon_scale",
+        "soft_sparse",
+        "soft_sparse_temp",
     ]:
         print(f"    {k}: {best.params.get(k, '?')}")
-    print(f"\n  V8 Features:")
-    for k in ["use_lindblad", "use_hybrid_automata", "use_quaternionic", "use_mhc"]:
+
+    print(f"\n  Spinor:")
+    for k in [
+        "block_size",
+        "state_dim",
+        "mimo_groups",
+        "d_conv",
+        "memory_horizon_ratio",
+    ]:
         print(f"    {k}: {best.params.get(k, '?')}")
-    print(f"\n  Encoder:")
-    for k in ["sdr_sparsity", "sdr_candidates"]:
+    print(f"    num_blocks: {num_blocks}")
+
+    print(f"\n  Propagator:")
+    for k in [
+        "cayley_dt",
+        "nonlinear_alpha",
+        "laplacian_sparsity",
+        "pit_gamma",
+        "use_chebyshev_kpm",
+        "chebyshev_degree",
+    ]:
+        print(f"    {k}: {best.params.get(k, '?')}")
+    print(f"    direct_solve: {direct_solve}")
+
+    print(f"\n  Sampler:")
+    for k in ["temperature", "top_k", "top_p"]:
+        print(f"    {k}: {best.params.get(k, '?')}")
+
+    print(f"\n  V8:")
+    for k in [
+        "use_lindblad",
+        "lindblad_gamma",
+        "num_lindblad_ops",
+        "use_hybrid_automata",
+        "curvature_threshold",
+        "use_quaternionic",
+        "condition_threshold",
+        "use_mhc",
+        "mhc_streams",
+        "mhc_num_iters",
+        "mhc_tau",
+    ]:
+        print(f"    {k}: {best.params.get(k, '?')}")
+
+    print(f"\n  Training:")
+    for k in [
+        "learning_rate",
+        "weight_decay",
+        "encoder_lr_scale",
+        "gradient_clip",
+        "unitary_lambda",
+        "unitary_clamp_min",
+        "unitary_clamp_max",
+        "label_smoothing",
+    ]:
         print(f"    {k}: {best.params.get(k, '?')}")
 
     top_5 = sorted(
