@@ -57,7 +57,7 @@ class Quaternion:
         self.z = z  # k coefficient (2nd extra dimension)
 
     @classmethod
-    def from_complex(cls, z: Tensor) -> 'Quaternion':
+    def from_complex(cls, z: Tensor) -> "Quaternion":
         """Lift complex tensor to quaternion (embed in i plane, j=k=0).
 
         Args:
@@ -65,12 +65,7 @@ class Quaternion:
         Returns:
             Quaternion with w=Re(z), x=Im(z), y=0, z=0
         """
-        return cls(
-            z.real,
-            z.imag,
-            torch.zeros_like(z.real),
-            torch.zeros_like(z.real)
-        )
+        return cls(z.real, z.imag, torch.zeros_like(z.real), torch.zeros_like(z.real))
 
     def to_complex(self) -> Tensor:
         """Project quaternion back to complex plane (discard j,k components).
@@ -80,7 +75,7 @@ class Quaternion:
         """
         return torch.complex(self.w, self.x)
 
-    def __mul__(self, other: 'Quaternion') -> 'Quaternion':
+    def __mul__(self, other: "Quaternion") -> "Quaternion":
         """Quaternion multiplication via Hamilton product.
 
         Non-commutative: q1 * q2 ≠ q2 * q1 in general
@@ -104,7 +99,7 @@ class Quaternion:
         z = self.w * other.z + self.z * other.w + self.x * other.y - self.y * other.x
         return Quaternion(w, x, y, z)
 
-    def conj(self) -> 'Quaternion':
+    def conj(self) -> "Quaternion":
         """Quaternion conjugate: q* = w - xi - yj - zk.
 
         Property: q * q* = |q|² (scalar)
@@ -118,7 +113,7 @@ class Quaternion:
         """
         return torch.sqrt(self.w**2 + self.x**2 + self.y**2 + self.z**2)
 
-    def normalize(self) -> 'Quaternion':
+    def normalize(self) -> "Quaternion":
         """Return unit quaternion (norm = 1).
 
         Unit quaternions form SU(2) and represent 3D rotations via:
@@ -131,12 +126,7 @@ class Quaternion:
         while n.dim() < self.w.dim():
             n = n.unsqueeze(-1)
 
-        return Quaternion(
-            self.w / n,
-            self.x / n,
-            self.y / n,
-            self.z / n
-        )
+        return Quaternion(self.w / n, self.x / n, self.y / n, self.z / n)
 
 
 class QuaternionicEscape(nn.Module):
@@ -163,26 +153,27 @@ class QuaternionicEscape(nn.Module):
     """
 
     def __init__(
-        self,
-        dim: int,
-        condition_threshold: float = 100.0,
-        learnable: bool = True
+        self, dim: int, condition_threshold: float = 100.0, learnable: bool = True
     ):
         super().__init__()
         self.dim = dim
 
         # Store threshold in log space for numerical stability
         if learnable:
-            self.log_threshold = nn.Parameter(torch.tensor(math.log(condition_threshold)))
+            self.log_threshold = nn.Parameter(
+                torch.tensor(math.log(condition_threshold))
+            )
         else:
-            self.register_buffer('log_threshold', torch.tensor(math.log(condition_threshold)))
+            self.register_buffer(
+                "log_threshold", torch.tensor(math.log(condition_threshold))
+            )
 
         # Escape rotation angle (initialized to π/2 = 90 degrees)
         # This rotates the state "perpendicular" to the complex plane
         if learnable:
             self.escape_angle = nn.Parameter(torch.tensor(math.pi / 2))
         else:
-            self.register_buffer('escape_angle', torch.tensor(math.pi / 2))
+            self.register_buffer("escape_angle", torch.tensor(math.pi / 2))
 
     def detect_singularity(self, H: Tensor) -> Tuple[Tensor, Tensor]:
         """Detect proximity to Cayley singularity via condition number.
@@ -205,23 +196,29 @@ class QuaternionicEscape(nn.Module):
 
         # Construct I + iH
         if H.is_complex():
-            I = torch.eye(D, device=device, dtype=H.dtype).unsqueeze(0).expand(B, -1, -1)
+            I = (
+                torch.eye(D, device=device, dtype=H.dtype)
+                .unsqueeze(0)
+                .expand(B, -1, -1)
+            )
             I_plus_iH = I + 1j * H
         else:
             # Real H: convert both I and H to complex
             I = torch.eye(D, device=device, dtype=dtype).unsqueeze(0).expand(B, -1, -1)
             I_plus_iH = I + 1j * H.to(dtype)
 
-        # Condition number = σ_max / σ_min
-        # Use try-except because SVD can fail on ill-conditioned matrices
+        # Condition number = σ_max / σ_min (clamped for numerical safety)
         try:
-            s = torch.linalg.svdvals(I_plus_iH)  # [B, D] singular values (descending)
-            # σ_max = s[..., 0], σ_min = s[..., -1]
+            s = torch.linalg.svdvals(I_plus_iH)  # [B, D] singular values
             condition = s[..., 0] / s[..., -1].clamp(min=1e-10)
-        except RuntimeError:
-            # Fallback: estimate via matrix norm (conservative upper bound)
-            # κ(A) ≤ ||A|| * ||A^{-1}|| ≈ ||A||² for near-singular matrices
-            condition = torch.linalg.matrix_norm(I_plus_iH, ord=2) * 1000.0
+            condition = condition.real if condition.is_complex() else condition
+            condition = condition.clamp(max=1e6)
+        except Exception:
+            # SVD can fail on ill-conditioned matrices (cusolver error 128).
+            # Frobenius norm² is always computable and serves as a loose upper bound.
+            frob = torch.linalg.matrix_norm(I_plus_iH, ord="fro")
+            frob = frob.real if frob.is_complex() else frob
+            condition = frob * frob
 
         # Check if condition exceeds threshold
         threshold = self.log_threshold.exp()
@@ -253,7 +250,7 @@ class QuaternionicEscape(nn.Module):
         half_angle = angle / 2
         rot_w = torch.cos(half_angle)  # Real part
         rot_x = torch.zeros_like(rot_w)  # i component = 0
-        rot_y = torch.sin(half_angle)   # j component (rotation axis)
+        rot_y = torch.sin(half_angle)  # j component (rotation axis)
         rot_z = torch.zeros_like(rot_w)  # k component = 0
 
         # Broadcast rotation quaternion to match psi shape
@@ -281,11 +278,7 @@ class QuaternionicEscape(nn.Module):
         # Project back to complex plane (discard j, k components)
         return q_rotated.to_complex()
 
-    def forward(
-        self,
-        psi: Tensor,
-        H: Tensor
-    ) -> Tuple[Tensor, Tensor]:
+    def forward(self, psi: Tensor, H: Tensor) -> Tuple[Tensor, Tensor]:
         """Apply quaternionic escape if near Cayley singularity.
 
         Workflow:
@@ -332,16 +325,10 @@ def test_quaternion_algebra():
 
     # Test 1: Multiplication identity
     q1 = Quaternion(
-        torch.tensor(1.0),
-        torch.tensor(2.0),
-        torch.tensor(3.0),
-        torch.tensor(4.0)
+        torch.tensor(1.0), torch.tensor(2.0), torch.tensor(3.0), torch.tensor(4.0)
     )
     identity = Quaternion(
-        torch.tensor(1.0),
-        torch.tensor(0.0),
-        torch.tensor(0.0),
-        torch.tensor(0.0)
+        torch.tensor(1.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
     )
     result = q1 * identity
     assert torch.allclose(result.w, q1.w)
@@ -362,10 +349,7 @@ def test_quaternion_algebra():
 
     # Test 3: Norm preservation |q1 * q2| = |q1| * |q2|
     q2 = Quaternion(
-        torch.tensor(0.5),
-        torch.tensor(-1.0),
-        torch.tensor(2.0),
-        torch.tensor(-0.5)
+        torch.tensor(0.5), torch.tensor(-1.0), torch.tensor(2.0), torch.tensor(-0.5)
     )
     product = q1 * q2
     lhs = product.norm()
@@ -423,7 +407,7 @@ def test_rotation_preserves_norm():
     escape = QuaternionicEscape(dim, learnable=False)
 
     # Rotate at various angles
-    for angle in [0.0, math.pi/4, math.pi/2, math.pi]:
+    for angle in [0.0, math.pi / 4, math.pi / 2, math.pi]:
         psi_rotated = escape.quaternionic_rotation(psi, torch.tensor(angle))
 
         # Check norm preservation

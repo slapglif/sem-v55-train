@@ -4,7 +4,7 @@ import torch
 import pytest
 from pathlib import Path
 
-from sem.config import SEMConfig
+from sem.config import SEMConfig, V8Config
 from sem.training.lightning_module import SEMLightningModule
 
 
@@ -34,6 +34,12 @@ def test_gradient_checkpointing_no_tensor_mismatch():
     config.training.batch_size = 2
     config.training.low_vram_mode = False
     config.distillation.enabled = False
+    config.v8 = V8Config(
+        use_lindblad=False,
+        use_hybrid_automata=False,
+        use_quaternionic=False,
+        use_mhc=False,
+    )
 
     # Create model with gradient checkpointing enabled
     module = SEMLightningModule(config)

@@ -16,13 +16,6 @@ from dataclasses import asdict
 
 from ..config import SEMConfig
 from ..model import SEMModel
-
-try:
-    from ..model_v8 import SEMV8Model
-
-    HAS_V8 = True
-except ImportError:
-    HAS_V8 = False
 from ..utils.complex_adamw import ComplexAdamW
 from ..quantizer.has_vq import HASVQ
 from ..data.streaming import PackedStreamingDataset
@@ -67,12 +60,20 @@ class SEMTrainer:
         self.dry_run = dry_run
 
         # Build model
-        if getattr(config.model, "model_version", "v55") == "v8" and HAS_V8:
-            logger.info("Building SEM V8.0 model...")
-            self.model = SEMV8Model(config).to(self.device)
+        v8_features = []
+        v8 = getattr(config, "v8", None)
+        if v8:
+            if getattr(v8, "use_lindblad", False):
+                v8_features.append("lindblad")
+            if getattr(v8, "use_hybrid_automata", False):
+                v8_features.append("hybrid_automata")
+            if getattr(v8, "use_quaternionic", False):
+                v8_features.append("quaternionic")
+        if v8_features:
+            logger.info(f"Building SEM model with V8 features: {v8_features}")
         else:
-            logger.info("Building SEM V5.5 model...")
-            self.model = SEMModel(config).to(self.device)
+            logger.info("Building SEM model...")
+        self.model = SEMModel(config).to(self.device)
         param_counts = self.model.count_parameters()
         logger.info(
             f"Parameters: {param_counts['total']['effective_real']:,} effective real"

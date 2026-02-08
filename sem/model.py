@@ -1,13 +1,10 @@
-"""SEM V5.5 'Lean Crystal' - Top-level Model.
+"""SEM - Signal-Entropic Model.
 
 Assembles the full Signal-Entropic Model:
     Encoder (MESH) -> Context (Spinors) -> Propagation (Cayley) -> Collapse (Born)
 
-The model processes token sequences through:
-1. MESH-SDR encoder: tokens -> sparse complex SDR on Crystal Manifold
-2. Complex Mamba-3 layers: sequential context integration via spinor rotations
-3. Cayley-Soliton propagator: unitary wave propagation through Graph Laplacian
-4. Born Collapse: wavefunction -> token probabilities via |ψ|²
+V8 features (Lindblad, HybridAutomata, Quaternionic, Engram, mHC) are controlled
+by config.v8 flags and default to enabled.
 """
 
 import torch
@@ -19,16 +16,233 @@ from typing import Optional
 from .config import SEMConfig
 from .encoder.mesh_sdr import MESHEncoder
 from .spinor.complex_mamba3 import ComplexMamba3Layer
+from .spinor.lindblad import LindbladDissipation
+from .spinor.hybrid_automata import HybridAutomata
+from .spinor.quaternion import QuaternionicEscape
 from .propagator.cayley_soliton import CayleySolitonStack
 from .sampler.born_collapse import BornCollapseSampler
 from .utils.complex_layernorm import ComplexRMSNorm
 
+# Optional imports
+try:
+    from .engram import Engram, EngramConfig
+
+    HAS_ENGRAM = True
+except ImportError:
+    HAS_ENGRAM = False
+
+try:
+    from .hyper_connections import mhc_residual
+
+    HAS_MHC = True
+except ImportError:
+    HAS_MHC = False
+
+
+class ComplexMamba3LayerV8(nn.Module):
+    """V8.0 Mamba layer with Lindblad, Quaternionic escape, and optional mHC.
+
+    Enhancements over V5.5:
+    1. Lindblad dissipation for selective forgetting
+    2. Hybrid automata for phase transition detection
+    3. Quaternionic escape for singularity handling
+    4. Optional mHC residual (if available)
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        state_dim: int = 64,
+        mimo_groups: int = 8,
+        block_size: int = 8,
+        d_conv: int = 4,
+        num_layers: int = 1,
+        memory_horizon_ratio: float = 0.0,
+        max_seq_length: int = 2048,
+        # V8.0 additions
+        use_mhc: bool = True,
+        mhc_num_iters: int = 10,
+        mhc_tau: float = 0.05,
+        use_lindblad: bool = True,
+        lindblad_gamma: float = 0.01,
+        num_lindblad_ops: int = 4,
+        use_hybrid_automata: bool = True,
+        curvature_threshold: float = 0.1,
+        use_quaternionic: bool = True,
+        condition_threshold: float = 100.0,
+    ):
+        """Initialize V8.0 Mamba layer.
+
+        Args:
+            hidden_dim: Model hidden dimension
+            state_dim: SSM state dimension
+            mimo_groups: Number of MIMO groups
+            block_size: Spinor block size
+            d_conv: Convolution kernel size
+            num_layers: Total number of layers (for residual scaling)
+            memory_horizon_ratio: τ = ratio * max_seq_length; 0 = default init
+            max_seq_length: Maximum sequence length for horizon scaling
+            use_mhc: Use manifold-constrained residuals (requires hyper_connections module)
+            mhc_num_iters: Sinkhorn iterations for Birkhoff projection
+            mhc_tau: Temperature for Sinkhorn
+            use_lindblad: Enable Lindblad dissipation
+            lindblad_gamma: Dissipation strength
+            num_lindblad_ops: Number of Lindblad operators
+            use_hybrid_automata: Enable curvature-based transitions
+            curvature_threshold: K threshold for transitions
+            use_quaternionic: Enable quaternionic singularity escape
+            condition_threshold: Condition number threshold for singularities
+        """
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.use_mhc = use_mhc and HAS_MHC
+        self.use_lindblad = use_lindblad
+        self.use_hybrid_automata = use_hybrid_automata
+        self.use_quaternionic = use_quaternionic
+
+        # Base Mamba layer (from V5.5)
+        self.base_layer = ComplexMamba3Layer(
+            hidden_dim=hidden_dim,
+            state_dim=state_dim,
+            mimo_groups=mimo_groups,
+            block_size=block_size,
+            d_conv=d_conv,
+            num_layers=num_layers,
+            memory_horizon_ratio=memory_horizon_ratio,
+            max_seq_length=max_seq_length,
+        )
+
+        # V8.0: mHC residual (replaces standard residual)
+        if self.use_mhc:
+            # For S=1, Sinkhorn is trivially [[1.0]] — use non-learnable buffers.
+            # For S>1, use nn.Parameter for actual stream mixing.
+            mhc_streams = 1
+            if mhc_streams == 1:
+                self.register_buffer("H_res_logits", torch.zeros(1, 1))
+                self.register_buffer("H_res_logits_imag", torch.zeros(1, 1))
+            else:
+                self.H_res_logits = nn.Parameter(torch.zeros(mhc_streams, mhc_streams))
+                self.H_res_logits_imag = nn.Parameter(
+                    torch.zeros(mhc_streams, mhc_streams)
+                )
+            self.mhc_num_iters = mhc_num_iters
+            self.mhc_tau = mhc_tau
+
+        # V8.0: Lindblad dissipation
+        if use_lindblad:
+            self.lindblad = LindbladDissipation(
+                dim=hidden_dim,
+                num_lindblad_ops=num_lindblad_ops,
+                gamma=lindblad_gamma,
+            )
+
+        # V8.0: Hybrid automata (singularity detection via Lie bracket curvature)
+        if use_hybrid_automata:
+            self.hybrid_automata = HybridAutomata(
+                dim=hidden_dim,
+                curvature_threshold=curvature_threshold,
+                learnable_threshold=True,
+            )
+            # Use plain attribute (not register_buffer) to avoid gradient checkpointing
+            # tensor metadata mismatch — _H_prev mutates shape during forward.
+            self._H_prev = None
+
+        # V8.0: Quaternionic escape
+        if use_quaternionic:
+            self.quaternionic = QuaternionicEscape(
+                dim=hidden_dim,
+                condition_threshold=condition_threshold,
+            )
+
+    def approximate_hamiltonian(self, psi: Tensor) -> Tensor:
+        """Approximate effective Hamiltonian from state magnitude pattern.
+
+        H_eff is used for:
+        1. Hybrid automata curvature computation
+        2. Quaternionic singularity detection
+
+        Approximation: H ≈ (1/N) Σ_s |ψ_s⟩⟨ψ_s| (outer product density)
+
+        Args:
+            psi: [B, S, D] complex state
+        Returns:
+            H: [B, D, D] approximate Hamiltonian
+        """
+        # Use magnitude pattern as proxy for energy density
+        mag = psi.abs()  # [B, S, D]
+
+        # Compute density matrix approximation
+        # H ≈ (1/S) Σ_s mag_s ⊗ mag_s
+        H = torch.einsum("bsd,bse->bde", mag, mag) / mag.shape[1]  # [B, D, D]
+
+        return H
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward pass with V8.0 enhancements.
+
+        Pipeline:
+        1. Base Mamba processing
+        2. Lindblad dissipation (selective forgetting)
+        3. Hybrid automata (curvature-based transitions)
+        4. Quaternionic escape (singularity handling)
+        5. mHC or standard residual
+
+        Args:
+            x: [B, S, D] complex64
+        Returns:
+            [B, S, D] complex64
+        """
+        residual = x
+        out = self.base_layer(x)
+
+        # Extract branch = f(x) from base_layer output (residual + scale * f(x))
+        scale = self.base_layer.residual_scale
+        branch_out = (out - residual) / max(scale, 1e-8)
+
+        if self.use_lindblad:
+            branch_out = self.lindblad(branch_out)
+
+        if self.use_hybrid_automata or self.use_quaternionic:
+            with torch.no_grad():
+                H_eff_real = self.approximate_hamiltonian(branch_out)
+                H_eff = torch.complex(H_eff_real, torch.zeros_like(H_eff_real))
+
+        if self.use_hybrid_automata:
+            if self._H_prev is not None and self._H_prev.shape[0] == H_eff.shape[0]:
+                branch_out, jumped = self.hybrid_automata(
+                    branch_out, H_eff, self._H_prev
+                )
+            self._H_prev = H_eff.detach()
+
+        if self.use_quaternionic:
+            branch_out, escaped = self.quaternionic(branch_out, H_eff)
+
+        # Re-scale branch back before residual combination to avoid gradient explosion
+        branch_out = branch_out * scale
+
+        if self.use_mhc:
+            out = mhc_residual(
+                residual,
+                branch_out,
+                self.H_res_logits,
+                H_res_logits_imag=self.H_res_logits_imag,
+                mhc_num_iters=self.mhc_num_iters,
+                mhc_tau=self.mhc_tau,
+            )
+        else:
+            out = residual + branch_out
+
+        return out
+
 
 class SEMModel(nn.Module):
-    """Signal-Entropic Model V5.5 'Lean Crystal'.
+    """Signal-Entropic Model.
 
     Full architecture combining MESH encoding, complex Mamba-3 spinors,
     Cayley-Soliton propagation, and Born collapse sampling.
+
+    V8 features (Lindblad, HybridAutomata, Quaternionic, Engram, mHC) are
+    activated when config.v8 flags are True.
     """
 
     def __init__(self, config: SEMConfig):
@@ -54,24 +268,83 @@ class SEMModel(nn.Module):
             simple_mode=c.encoder.simple_mode,
         )
 
-        # 2. Complex Mamba-3 Spinor Layers
-        self.mamba_layers = nn.ModuleList(
+        # Determine if V8 features are needed
+        v8 = getattr(c, "v8", None)
+        self._use_v8_layers = any(
             [
-                ComplexMamba3Layer(
-                    hidden_dim=c.model.hidden_dim,
-                    state_dim=c.spinor.state_dim,
-                    mimo_groups=c.spinor.mimo_groups,
-                    block_size=c.spinor.block_size,
-                    d_conv=c.spinor.d_conv,
-                    num_layers=c.model.num_layers,
-                    memory_horizon_ratio=c.spinor.memory_horizon_ratio,
-                    max_seq_length=c.model.max_seq_length,
-                )
-                for _ in range(c.model.num_layers)
+                getattr(v8, "use_lindblad", False) if v8 else False,
+                getattr(v8, "use_hybrid_automata", False) if v8 else False,
+                getattr(v8, "use_quaternionic", False) if v8 else False,
+                getattr(v8, "use_mhc", False) if v8 else False,
             ]
         )
 
-        # 3. Cayley-Soliton Propagator Stack
+        # 2. Engram (optional - O(1) N-gram lookup)
+        self.use_engram = False
+        if HAS_ENGRAM and hasattr(c, "engram") and getattr(c.engram, "enabled", False):
+            self.use_engram = True
+            engram_config = EngramConfig(
+                tokenizer=getattr(c.engram, "tokenizer", None),
+                max_ngram_size=getattr(c.engram, "max_ngram_size", 3),
+                layer_ids=list(c.engram.layer_ids),
+            )
+            self.engram_layers = nn.ModuleDict()
+            for layer_id in engram_config.layer_ids:
+                self.engram_layers[str(layer_id)] = Engram(
+                    layer_id=layer_id,
+                    hidden_size=c.model.hidden_dim,
+                    config=engram_config,
+                )
+
+        # 3. Complex Mamba-3 Spinor Layers (V8 wrapper or plain V5.5)
+        if self._use_v8_layers:
+            use_lindblad = getattr(v8, "use_lindblad", False)
+            use_hybrid = getattr(v8, "use_hybrid_automata", False)
+            use_quat = getattr(v8, "use_quaternionic", False)
+            use_mhc = getattr(v8, "use_mhc", False)
+
+            self.mamba_layers = nn.ModuleList(
+                [
+                    ComplexMamba3LayerV8(
+                        hidden_dim=c.model.hidden_dim,
+                        state_dim=c.spinor.state_dim,
+                        mimo_groups=c.spinor.mimo_groups,
+                        block_size=c.spinor.block_size,
+                        d_conv=c.spinor.d_conv,
+                        num_layers=c.model.num_layers,
+                        memory_horizon_ratio=c.spinor.memory_horizon_ratio,
+                        max_seq_length=c.model.max_seq_length,
+                        # V8.0 config
+                        use_mhc=use_mhc,
+                        use_lindblad=use_lindblad,
+                        lindblad_gamma=getattr(v8, "lindblad_gamma", 0.01),
+                        num_lindblad_ops=getattr(v8, "num_lindblad_ops", 4),
+                        use_hybrid_automata=use_hybrid,
+                        curvature_threshold=getattr(v8, "curvature_threshold", 0.1),
+                        use_quaternionic=use_quat,
+                        condition_threshold=getattr(v8, "condition_threshold", 100.0),
+                    )
+                    for _ in range(c.model.num_layers)
+                ]
+            )
+        else:
+            self.mamba_layers = nn.ModuleList(
+                [
+                    ComplexMamba3Layer(
+                        hidden_dim=c.model.hidden_dim,
+                        state_dim=c.spinor.state_dim,
+                        mimo_groups=c.spinor.mimo_groups,
+                        block_size=c.spinor.block_size,
+                        d_conv=c.spinor.d_conv,
+                        num_layers=c.model.num_layers,
+                        memory_horizon_ratio=c.spinor.memory_horizon_ratio,
+                        max_seq_length=c.model.max_seq_length,
+                    )
+                    for _ in range(c.model.num_layers)
+                ]
+            )
+
+        # 4. Cayley-Soliton Propagator Stack
         self.propagator = CayleySolitonStack(
             dim=c.model.hidden_dim,
             num_layers=c.model.num_layers,
@@ -92,10 +365,10 @@ class SEMModel(nn.Module):
             cg_tol_mid_end=c.propagator.cg_tol_mid_end,
         )
 
-        # 4. Final normalization before collapse
+        # 5. Final normalization before collapse
         self.final_norm = ComplexRMSNorm(c.model.hidden_dim)
 
-        # 5. Born Collapse Sampler
+        # 6. Born Collapse Sampler
         self.sampler = BornCollapseSampler(
             hidden_dim=c.model.hidden_dim,
             vocab_size=c.model.vocab_size,
@@ -126,6 +399,17 @@ class SEMModel(nn.Module):
         self.propagator_enabled = False
         self._propagator_warmup_steps = c.training.warmup_steps
 
+    def enable_propagator(self, enable: bool = True):
+        """Enable or disable Cayley-Soliton propagator.
+
+        Typically disabled during warmup to avoid CG convergence issues,
+        then enabled once the model learns reasonable representations.
+
+        Args:
+            enable: If True, propagator is applied. If False, skip.
+        """
+        self.propagator_enabled = enable
+
     def forward(
         self,
         token_ids: Tensor,
@@ -146,8 +430,15 @@ class SEMModel(nn.Module):
         # 1. Encode: tokens -> Crystal Manifold
         psi = self.encoder(token_ids, token_freqs=token_freqs)  # [B, S, D] complex64
 
-        # 2. Context: spinor rotation layers
-        for mamba_layer in self.mamba_layers:
+        # 2. Context: spinor rotation layers (with optional Engram)
+        for i, mamba_layer in enumerate(self.mamba_layers):
+            # Apply Engram if configured for this layer
+            if self.use_engram and str(i) in self.engram_layers:
+                # Engram expects [B, L, D] real features — use magnitude as proxy
+                engram_out = self.engram_layers[str(i)](psi.abs(), token_ids)
+                # Add engram contribution to real part
+                psi = torch.complex(psi.real + engram_out, psi.imag)
+
             psi = mamba_layer(psi)  # [B, S, D] complex64
 
         # 3. Propagate: Cayley-Soliton diffusion (SEOP Fix 45: skip during warmup for 3x throughput)
@@ -197,9 +488,61 @@ class SEMModel(nn.Module):
                 # Unitarity is enforced structurally by Cayley transform;
                 # loss term is purely a monitoring/regularization signal.
                 loss = loss + unitary_lambda * unitary_divergence.detach()
+
+            # V8: Add unitarity regularization from HybridAutomata layers
+            if self._use_v8_layers:
+                for layer in self.mamba_layers:
+                    if (
+                        hasattr(layer, "use_hybrid_automata")
+                        and layer.use_hybrid_automata
+                    ):
+                        if unitary_lambda != 0.0:
+                            loss = (
+                                loss
+                                + unitary_lambda
+                                * layer.hybrid_automata.compute_unitarity_loss()
+                            )
+                        else:
+                            loss = loss + layer.hybrid_automata.compute_unitarity_loss()
+
             output["loss"] = loss
 
         return output
+
+    def get_diagnostics(self) -> dict:
+        """Get diagnostic information about V8 components.
+
+        Returns:
+            dict with:
+                'lindblad_gamma': List of dissipation strengths per layer
+                'num_quaternionic_escapes': How many times escape was triggered
+                'num_hybrid_jumps': How many times transitions occurred
+                'engram_active': Which layers have Engram
+                'mhc_enabled': Which layers use mHC
+        """
+        if not self._use_v8_layers and not self.use_engram:
+            return {}
+
+        diagnostics = {
+            "lindblad_gamma": [],
+            "num_quaternionic_escapes": 0,
+            "num_hybrid_jumps": 0,
+            "engram_active": [],
+            "mhc_enabled": [],
+        }
+
+        if self._use_v8_layers:
+            for i, layer in enumerate(self.mamba_layers):
+                if hasattr(layer, "use_lindblad") and layer.use_lindblad:
+                    diagnostics["lindblad_gamma"].append(layer.lindblad.gamma)
+
+                if hasattr(layer, "use_mhc") and layer.use_mhc:
+                    diagnostics["mhc_enabled"].append(i)
+
+        if self.use_engram:
+            diagnostics["engram_active"] = list(self.engram_layers.keys())
+
+        return diagnostics
 
     def count_parameters(self) -> dict:
         """Count parameters by module."""
@@ -302,6 +645,9 @@ class SEMModel(nn.Module):
     ) -> Tensor:
         """Encode and apply context layers (helper for generation)."""
         psi = self.encoder(token_ids, token_freqs=token_freqs)
-        for mamba_layer in self.mamba_layers:
+        for i, mamba_layer in enumerate(self.mamba_layers):
+            if self.use_engram and str(i) in self.engram_layers:
+                engram_out = self.engram_layers[str(i)](psi.abs(), token_ids)
+                psi = torch.complex(psi.real + engram_out, psi.imag)
             psi = mamba_layer(psi)
         return psi

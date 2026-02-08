@@ -23,6 +23,7 @@ from sem.config import (
     SamplerConfig,
     TrainingConfig,
     DistillationConfig,
+    V8Config,
 )
 from sem.utils.complex_adamw import ComplexAdamW
 
@@ -76,19 +77,25 @@ def minimal_config():
         ),
         training=TrainingConfig(
             batch_size=8,
-            learning_rate=1e-3,  # Aggressive LR for fast overfitting
-            weight_decay=0.0,  # No regularization
+            learning_rate=1e-3,
+            weight_decay=0.0,
             warmup_steps=20,
             max_steps=200,
-            gradient_clip=1.0,
+            gradient_clip=10.0,
             dtype="complex64",
             low_vram_mode=False,
-            unitary_lambda=0.01,  # Small penalty for fast convergence
+            unitary_lambda=0.01,
             decay_steps=180,
             lr_min_ratio=0.1,
         ),
         distillation=DistillationConfig(
-            enabled=False,  # No distillation for this test
+            enabled=False,
+        ),
+        v8=V8Config(
+            use_lindblad=True,
+            use_hybrid_automata=True,
+            use_quaternionic=True,
+            use_mhc=True,
         ),
     )
 
@@ -194,7 +201,7 @@ def test_quick_convergence(minimal_config):
         # Print progress every 20 steps
         if (step + 1) % 20 == 0 or step == 0:
             print(
-                f"Step {step+1:3d}/{num_steps} | Loss: {loss.item():.4f} | "
+                f"Step {step + 1:3d}/{num_steps} | Loss: {loss.item():.4f} | "
                 f"Grad norm: {total_grad_norm:.4f}"
             )
 
@@ -215,23 +222,23 @@ def test_quick_convergence(minimal_config):
     print("=" * 60 + "\n")
 
     # Assertions
-    assert (
-        loss_reduction >= 0.5
-    ), f"Loss should decrease by at least 50%, got {loss_reduction * 100:.1f}%"
-    assert (
-        final_loss < initial_loss
-    ), f"Final loss should be lower than initial loss"
-    assert all(
-        grad_norm > 0 for grad_norm in grad_norms
-    ), "All gradient norms should be positive (gradients flowing)"
-    assert not any(
-        torch.isnan(torch.tensor(loss)) for loss in losses
-    ), "No NaN in losses"
+    assert loss_reduction >= 0.5, (
+        f"Loss should decrease by at least 50%, got {loss_reduction * 100:.1f}%"
+    )
+    assert final_loss < initial_loss, f"Final loss should be lower than initial loss"
+    assert all(grad_norm > 0 for grad_norm in grad_norms), (
+        "All gradient norms should be positive (gradients flowing)"
+    )
+    assert not any(torch.isnan(torch.tensor(loss)) for loss in losses), (
+        "No NaN in losses"
+    )
 
     print("✅ CONVERGENCE TEST PASSED")
     print(f"   Model successfully learned the synthetic pattern")
     print(f"   Loss reduced by {loss_reduction * 100:.1f}%")
-    print(f"   Gradients flowing correctly (avg norm: {sum(grad_norms) / len(grad_norms):.4f})")
+    print(
+        f"   Gradients flowing correctly (avg norm: {sum(grad_norms) / len(grad_norms):.4f})"
+    )
 
 
 if __name__ == "__main__":

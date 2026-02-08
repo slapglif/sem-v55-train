@@ -326,13 +326,15 @@ def mhc_residual(
         >>> y = mhc_residual(x, branch, H_logits)
     """
     if complex_mode:
-        # Split complex tensor into real/imag
+        # S=1 fast path: Sinkhorn on [1,1] is always [[1.0]], skip entirely
+        if H_res_logits.shape[-1] == 1:
+            return x + branch_output
+
         x_real = x.real
         x_imag = x.imag
         branch_real = branch_output.real
         branch_imag = branch_output.imag
 
-        # Use provided imaginary logits or fall back to zeros
         imag_logits = (
             H_res_logits_imag
             if H_res_logits_imag is not None
@@ -346,8 +348,6 @@ def mhc_residual(
             tau=mhc_tau,
         )
 
-        # Apply to real and imag separately
-        # For [1,1] matrix: just scalar multiplication
         residual_real = H_real[0, 0] * x_real
         residual_imag = H_imag[0, 0] * x_imag
 
@@ -356,6 +356,8 @@ def mhc_residual(
 
         return torch.complex(output_real, output_imag)
     else:
+        if H_res_logits.shape[-1] == 1:
+            return x + branch_output
         H = sinkhorn_log(H_res_logits, num_iters=mhc_num_iters, tau=mhc_tau)
         residual_weighted = H[0, 0] * x
         return residual_weighted + branch_output

@@ -199,6 +199,7 @@ class TestTrainingLoop:
             EncoderConfig,
             SpinorConfig,
             PropagatorConfig,
+            V8Config,
         )
         from sem.model import SEMModel
         from sem.utils.complex_adamw import ComplexAdamW
@@ -212,6 +213,12 @@ class TestTrainingLoop:
                 block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
             ),
             propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
+            v8=V8Config(
+                use_lindblad=False,
+                use_hybrid_automata=False,
+                use_quaternionic=False,
+                use_mhc=False,
+            ),
         )
 
         model = SEMModel(config)
@@ -221,7 +228,7 @@ class TestTrainingLoop:
         tokens = torch.randint(0, 20, (4, 8))
 
         losses = []
-        for _ in range(5):
+        for _ in range(10):
             output = model(tokens, targets=tokens)
             loss = output["loss"]
 

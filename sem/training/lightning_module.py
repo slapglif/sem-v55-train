@@ -5,13 +5,6 @@ from typing import Any, Dict, Optional
 import math
 
 from ..model import SEMModel
-
-try:
-    from ..model_v8 import SEMV8Model
-
-    HAS_V8 = True
-except ImportError:
-    HAS_V8 = False
 from ..utils.complex_adamw import ComplexAdamW
 from .scheduler import WSDScheduler
 from .distillation import EMATeacher, DistillationLoss
@@ -24,10 +17,7 @@ class SEMLightningModule(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
-        if getattr(config.model, "model_version", "v55") == "v8" and HAS_V8:
-            self.model = SEMV8Model(config)
-        else:
-            self.model = SEMModel(config)
+        self.model = SEMModel(config)
 
         # SEOP Fix 27: Explicitly enable gradient checkpointing if configured
         if (

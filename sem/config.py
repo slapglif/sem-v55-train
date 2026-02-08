@@ -182,7 +182,7 @@ class V8Config:
     use_lindblad: bool = True
     use_hybrid_automata: bool = True
     use_quaternionic: bool = True
-    use_mhc: bool = False
+    use_mhc: bool = True
     lindblad_gamma: float = 0.01
     num_lindblad_ops: int = 4
     curvature_threshold: float = 0.1
