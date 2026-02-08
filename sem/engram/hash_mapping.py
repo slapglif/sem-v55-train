@@ -8,6 +8,7 @@ with different vocabulary sizes (prime numbers for collision resistance).
 
 from typing import Any, Optional
 import numpy as np
+import torch
 from sympy import isprime
 
 from .compressed_tokenizer import CompressedTokenizer
@@ -100,7 +101,9 @@ class NgramHashMapping:
         for layer_id in self.layer_ids:
             base_seed = int(seed + PRIME_1 * int(layer_id))
             g = np.random.default_rng(base_seed)
-            r = g.integers(low=0, high=half_bound, size=(self.max_ngram_size,), dtype=np.int64)
+            r = g.integers(
+                low=0, high=half_bound, size=(self.max_ngram_size,), dtype=np.int64
+            )
             # Ensure odd multipliers for better hash distribution
             multipliers = r * 2 + 1
             self.layer_multipliers[layer_id] = multipliers
@@ -134,7 +137,9 @@ class NgramHashMapping:
                 # Find num_head distinct primes >= vocab_size
                 current_prime_search_start = vocab_size - 1
                 for _ in range(num_head):
-                    found_prime = find_next_prime(current_prime_search_start, seen_primes)
+                    found_prime = find_next_prime(
+                        current_prime_search_start, seen_primes
+                    )
                     seen_primes.add(found_prime)
                     current_ngram_heads_sizes.append(found_prime)
                     current_prime_search_start = found_prime
@@ -164,7 +169,9 @@ class NgramHashMapping:
             """Shift input_ids by k positions, padding with pad_id."""
             if k == 0:
                 return x
-            shifted = np.pad(x, ((0, 0), (k, 0)), mode='constant', constant_values=self.pad_id)[:, :T]
+            shifted = np.pad(
+                x, ((0, 0), (k, 0)), mode="constant", constant_values=self.pad_id
+            )[:, :T]
             return shifted
 
         base_shifts = [shift_k(k) for k in range(self.max_ngram_size)]
@@ -180,7 +187,7 @@ class NgramHashMapping:
 
             # Hash via XOR of (token * multiplier)
             # mix = t0*m0 XOR t1*m1 XOR t2*m2 ...
-            mix = (tokens[0] * multipliers[0])
+            mix = tokens[0] * multipliers[0]
             for k in range(1, n):
                 mix = np.bitwise_xor(mix, tokens[k] * multipliers[k])
 
@@ -210,6 +217,96 @@ class NgramHashMapping:
 
         hash_ids_for_all_layers: dict[int, np.ndarray] = {}
         for layer_id in self.layer_ids:
-            hash_ids_for_all_layers[layer_id] = self._get_ngram_hashes(input_ids, layer_id=layer_id)
+            hash_ids_for_all_layers[layer_id] = self._get_ngram_hashes(
+                input_ids, layer_id=layer_id
+            )
+
+        return hash_ids_for_all_layers
+
+    def hash_gpu(self, input_ids: torch.Tensor) -> dict[int, torch.Tensor]:
+        """Generate n-gram hash IDs for all layers on GPU.
+
+        Avoids GPU-CPU synchronization and data transfer overhead.
+
+        Args:
+            input_ids: [B, T] int64 token IDs (original vocabulary) on GPU
+
+        Returns:
+            Dict[layer_id -> Tensor[B, T, num_heads_total]] on same device
+        """
+        device = input_ids.device
+        B, T = input_ids.shape
+
+        # Compressed mapping on GPU (only created once)
+        if not hasattr(self, "_gpu_map") or self._gpu_map.device != device:
+            vocab_size = (
+                max(max(self.compressed_tokenizer.lookup_table.keys()), self.pad_id) + 1
+            )
+            # Create dense mapping tensor
+            # Default to 0 (unk)
+            self._gpu_map = torch.zeros(vocab_size, dtype=torch.int64, device=device)
+            # Fill known mappings
+            keys = torch.tensor(
+                list(self.compressed_tokenizer.lookup_table.keys()), device=device
+            )
+            vals = torch.tensor(
+                list(self.compressed_tokenizer.lookup_table.values()), device=device
+            )
+            self._gpu_map[keys] = vals.to(torch.int64)
+            self._pad_id_gpu = torch.tensor(
+                self.pad_id, device=device, dtype=torch.int64
+            )
+
+        # 1. Compress tokens (vectorized lookup)
+        # Handle out-of-vocab by clamping
+        safe_ids = input_ids.clamp(max=len(self._gpu_map) - 1)
+        x = self._gpu_map[safe_ids]  # [B, T]
+
+        hash_ids_for_all_layers = {}
+
+        for layer_id in self.layer_ids:
+            # Get multipliers on device
+            if (
+                not hasattr(self, f"_mult_{layer_id}")
+                or getattr(self, f"_mult_{layer_id}").device != device
+            ):
+                mult = torch.tensor(
+                    self.layer_multipliers[layer_id], device=device, dtype=torch.int64
+                )
+                setattr(self, f"_mult_{layer_id}", mult)
+
+            multipliers = getattr(self, f"_mult_{layer_id}")
+
+            all_hashes = []
+
+            # For each n-gram size
+            for n in range(2, self.max_ngram_size + 1):
+                # Manual shift logic with torch operations
+                # t0 * m0
+                mix = x * multipliers[0]
+
+                for k in range(1, n):
+                    # Shift right by k
+                    shifted = torch.cat(
+                        [
+                            torch.full(
+                                (B, k), self.pad_id, device=device, dtype=torch.int64
+                            ),
+                            x[:, :-k],
+                        ],
+                        dim=1,
+                    )
+                    # XOR with shifted * multiplier
+                    mix = torch.bitwise_xor(mix, shifted * multipliers[k])
+
+                # Heads with prime modulo
+                n_gram_index = n - 2
+                head_sizes = self.vocab_size_across_layers[layer_id][n_gram_index]
+
+                for mod in head_sizes:
+                    all_hashes.append(mix % mod)
+
+            # Stack: [B, T, num_heads_total]
+            hash_ids_for_all_layers[layer_id] = torch.stack(all_hashes, dim=2)
 
         return hash_ids_for_all_layers

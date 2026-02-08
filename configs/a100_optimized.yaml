@@ -96,8 +96,8 @@ training:
 
 v8:
   use_lindblad: true
-  use_hybrid_automata: false
-  use_quaternionic: false # SEOP Fix: Disable SVD-based escape
+  use_hybrid_automata: false # SEOP Fix: Disable to save 3 kernels/layer
+  use_quaternionic: false
   use_mhc: true
   mhc_streams: 8
   mhc_num_iters: 1 # SEOP Fix: Reduce from 3 to 1 to save Sinkhorn passes

@@ -177,10 +177,22 @@ def main():
 
     if device_type == "cuda" and not args.no_compile:
         try:
-            model = torch.compile(model, mode="reduce-overhead")
-            logger.info("torch.compile enabled (reduce-overhead)")
+            # SEOP Fix: Partial compilation for float32 submodules
+            # Full torch.compile fails on complex tensors (stride errors)
+            from sem.training.partial_compile import SelectiveCompileWrapper
+
+            # Compile only safe float32 components
+            compile_list = ["encoder", "sampler", "final_norm"]
+            # Note: mamba_layers and propagator contain complex ops, so we skip them for now
+            # unless we implement Real-Block conversion.
+
+            model = SelectiveCompileWrapper(
+                model, compile_list=compile_list, mode="reduce-overhead"
+            )
+            logger.info(f"Partial torch.compile applied to: {compile_list}")
         except Exception as e:
-            logger.warning(f"torch.compile failed, falling back to eager: {e}")
+            logger.warning(f"Partial compilation failed: {e}")
+            logger.info("Falling back to eager mode")
     elif args.no_compile:
         logger.info("torch.compile disabled (--no-compile)")
 
