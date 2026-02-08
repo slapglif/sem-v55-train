@@ -252,7 +252,7 @@ def main():
             effective_strategy = strategy
         elif args.strategy == "ddp_find_unused_parameters_true":
             effective_strategy = DDPStrategy(
-                find_unused_parameters=True, static_graph=True
+                find_unused_parameters=True,
             )
         else:
             effective_strategy = args.strategy
