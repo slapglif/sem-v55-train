@@ -235,7 +235,7 @@ class ConsoleCallback:
         self._step_times = []
 
     def on_step_start(self):
-        pass
+        self._step_start_time = time.perf_counter()
 
     def on_step_end(
         self,

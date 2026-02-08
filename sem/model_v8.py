@@ -33,12 +33,14 @@ from .utils.complex_layernorm import ComplexRMSNorm
 # Optional imports (may not exist yet)
 try:
     from .engram import Engram, EngramConfig
+
     HAS_ENGRAM = True
 except ImportError:
     HAS_ENGRAM = False
 
 try:
     from .hyper_connections import mhc_residual
+
     HAS_MHC = True
 except ImportError:
     HAS_MHC = False
@@ -137,7 +139,7 @@ class ComplexMamba3LayerV8(nn.Module):
                 learnable_threshold=True,
             )
             # Store previous H for curvature computation (as buffer for DDP compat)
-            self.register_buffer('_H_prev', None)
+            self.register_buffer("_H_prev", None)
 
         # V8.0: Quaternionic escape
         if use_quaternionic:
@@ -165,7 +167,7 @@ class ComplexMamba3LayerV8(nn.Module):
 
         # Compute density matrix approximation
         # H ≈ (1/S) Σ_s mag_s ⊗ mag_s
-        H = torch.einsum('bsd,bse->bde', mag, mag) / mag.shape[1]  # [B, D, D]
+        H = torch.einsum("bsd,bse->bde", mag, mag) / mag.shape[1]  # [B, D, D]
 
         return H
 
@@ -207,7 +209,9 @@ class ComplexMamba3LayerV8(nn.Module):
         # Hybrid automata: check for curvature spikes
         if self.use_hybrid_automata:
             if self._H_prev is not None and self._H_prev.shape[0] == H_eff.shape[0]:
-                branch_out, jumped = self.hybrid_automata(branch_out, H_eff, self._H_prev)
+                branch_out, jumped = self.hybrid_automata(
+                    branch_out, H_eff, self._H_prev
+                )
             self._H_prev = H_eff.detach()
 
         # Quaternionic escape at singularities
@@ -217,7 +221,8 @@ class ComplexMamba3LayerV8(nn.Module):
         # mHC residual (Birkhoff polytope projection) or standard residual
         if self.use_mhc:
             out = mhc_residual(
-                residual, branch_out,
+                residual,
+                branch_out,
                 self.H_res_logits,
                 H_res_logits_imag=self.H_res_logits_imag,
                 mhc_num_iters=self.mhc_num_iters,
@@ -281,11 +286,11 @@ class SEMV8Model(nn.Module):
         # 2. Engram (optional - O(1) N-gram lookup)
         # Configuration not yet in SEMConfig, so disabled for now
         self.use_engram = False
-        if HAS_ENGRAM and hasattr(c, 'engram') and c.engram.enabled:
+        if HAS_ENGRAM and hasattr(c, "engram") and c.engram.enabled:
             self.use_engram = True
             engram_config = EngramConfig(
-                tokenizer=getattr(c.engram, 'tokenizer', None),
-                max_ngram_size=getattr(c.engram, 'max_ngram_size', 3),
+                tokenizer=getattr(c.engram, "tokenizer", None),
+                max_ngram_size=getattr(c.engram, "max_ngram_size", 3),
                 layer_ids=list(c.engram.layer_ids),
             )
             self.engram_layers = nn.ModuleDict()
@@ -298,32 +303,44 @@ class SEMV8Model(nn.Module):
 
         # 3. V8.0 Mamba layers (with Lindblad, Hybrid Automata, Quaternionic)
         # Read V8 config if available, else use defaults
-        v8_config = getattr(c, 'v8', None)
-        use_lindblad = getattr(v8_config, 'use_lindblad', True) if v8_config else True
-        use_hybrid = getattr(v8_config, 'use_hybrid_automata', True) if v8_config else True
-        use_quat = getattr(v8_config, 'use_quaternionic', True) if v8_config else True
-        use_mhc = getattr(v8_config, 'use_mhc', False) if v8_config else False
+        v8_config = getattr(c, "v8", None)
+        use_lindblad = getattr(v8_config, "use_lindblad", True) if v8_config else True
+        use_hybrid = (
+            getattr(v8_config, "use_hybrid_automata", True) if v8_config else True
+        )
+        use_quat = getattr(v8_config, "use_quaternionic", True) if v8_config else True
+        use_mhc = getattr(v8_config, "use_mhc", False) if v8_config else False
 
-        self.mamba_layers = nn.ModuleList([
-            ComplexMamba3LayerV8(
-                hidden_dim=c.model.hidden_dim,
-                state_dim=c.spinor.state_dim,
-                mimo_groups=c.spinor.mimo_groups,
-                block_size=c.spinor.block_size,
-                d_conv=c.spinor.d_conv,
-                num_layers=c.model.num_layers,
-                # V8.0 config (use defaults if not specified)
-                use_mhc=use_mhc,
-                use_lindblad=use_lindblad,
-                lindblad_gamma=getattr(v8_config, 'lindblad_gamma', 0.01) if v8_config else 0.01,
-                num_lindblad_ops=getattr(v8_config, 'num_lindblad_ops', 4) if v8_config else 4,
-                use_hybrid_automata=use_hybrid,
-                curvature_threshold=getattr(v8_config, 'curvature_threshold', 0.1) if v8_config else 0.1,
-                use_quaternionic=use_quat,
-                condition_threshold=getattr(v8_config, 'condition_threshold', 100.0) if v8_config else 100.0,
-            )
-            for _ in range(c.model.num_layers)
-        ])
+        self.mamba_layers = nn.ModuleList(
+            [
+                ComplexMamba3LayerV8(
+                    hidden_dim=c.model.hidden_dim,
+                    state_dim=c.spinor.state_dim,
+                    mimo_groups=c.spinor.mimo_groups,
+                    block_size=c.spinor.block_size,
+                    d_conv=c.spinor.d_conv,
+                    num_layers=c.model.num_layers,
+                    # V8.0 config (use defaults if not specified)
+                    use_mhc=use_mhc,
+                    use_lindblad=use_lindblad,
+                    lindblad_gamma=getattr(v8_config, "lindblad_gamma", 0.01)
+                    if v8_config
+                    else 0.01,
+                    num_lindblad_ops=getattr(v8_config, "num_lindblad_ops", 4)
+                    if v8_config
+                    else 4,
+                    use_hybrid_automata=use_hybrid,
+                    curvature_threshold=getattr(v8_config, "curvature_threshold", 0.1)
+                    if v8_config
+                    else 0.1,
+                    use_quaternionic=use_quat,
+                    condition_threshold=getattr(v8_config, "condition_threshold", 100.0)
+                    if v8_config
+                    else 100.0,
+                )
+                for _ in range(c.model.num_layers)
+            ]
+        )
 
         # 4. Cayley-Soliton Propagator (optional, skip during warmup)
         self.propagator = CayleySolitonStack(
@@ -416,8 +433,15 @@ class SEMV8Model(nn.Module):
         # 4. Final norm
         psi = self.final_norm(psi)
 
+        # Unitarity monitoring/regularization (shared with v5.5).
+        psi_energy = (psi.real * psi.real + psi.imag * psi.imag).sum(dim=-1)  # [B,S]
+        psi_energy_norm = psi_energy / float(self.config.model.hidden_dim)
+        unitary_divergence = (torch.log(psi_energy_norm + 1e-12) ** 2).mean()
+
         # 5. Born collapse
         output = self.sampler(psi, sample=not self.training)
+
+        output["unitary_divergence"] = unitary_divergence
 
         # 6. Loss computation
         if targets is not None:
@@ -429,10 +453,21 @@ class SEMV8Model(nn.Module):
                 label_smoothing=self.config.training.label_smoothing,
             )
 
+            unitary_lambda = float(getattr(self.config.training, "unitary_lambda", 0.0))
+            if unitary_lambda != 0.0:
+                loss = loss + unitary_lambda * unitary_divergence
+
             # Add unitarity regularization from HybridAutomata layers
             for layer in self.mamba_layers:
                 if layer.use_hybrid_automata:
-                    loss = loss + 0.01 * layer.hybrid_automata.compute_unitarity_loss()
+                    if unitary_lambda != 0.0:
+                        loss = (
+                            loss
+                            + unitary_lambda
+                            * layer.hybrid_automata.compute_unitarity_loss()
+                        )
+                    else:
+                        loss = loss + layer.hybrid_automata.compute_unitarity_loss()
 
             output["loss"] = loss
 
@@ -450,22 +485,22 @@ class SEMV8Model(nn.Module):
                 'mhc_enabled': Which layers use mHC
         """
         diagnostics = {
-            'lindblad_gamma': [],
-            'num_quaternionic_escapes': 0,
-            'num_hybrid_jumps': 0,
-            'engram_active': [],
-            'mhc_enabled': [],
+            "lindblad_gamma": [],
+            "num_quaternionic_escapes": 0,
+            "num_hybrid_jumps": 0,
+            "engram_active": [],
+            "mhc_enabled": [],
         }
 
         for i, layer in enumerate(self.mamba_layers):
             if layer.use_lindblad:
-                diagnostics['lindblad_gamma'].append(layer.lindblad.gamma)
+                diagnostics["lindblad_gamma"].append(layer.lindblad.gamma)
 
             if layer.use_mhc:
-                diagnostics['mhc_enabled'].append(i)
+                diagnostics["mhc_enabled"].append(i)
 
         if self.use_engram:
-            diagnostics['engram_active'] = list(self.engram_layers.keys())
+            diagnostics["engram_active"] = list(self.engram_layers.keys())
 
         return diagnostics
 

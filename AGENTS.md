@@ -1,132 +1,114 @@
-# AGENTS.md - Agent Task Chains & Dependencies
+<!-- Generated: 2026-02-03 | Updated: 2026-02-03 -->
 
-## Project: Real-Block Isomorphism (XPU Support)
+# SEM V5.5 "Lean Crystal" - Signal-Entropic Model
 
-### 1. Goal
-Refactor the `sem` codebase to replace `torch.complex64` parameters and arithmetic with explicit Real-Block Isomorphism ($C \to R^2$) to enable full Intel XPU/NPU support and maximize entropy transfer per FLOP.
+## Purpose
 
-### 2. Task Graph
+A novel language model architecture implementing **Signal-Entropic principles** with:
+- **MESH-SDR Encoder**: Tokens → sparse complex SDR on Crystal Manifold via Sinkhorn OT
+- **Complex Mamba-3 Layers**: Sequential context integration via spinor rotations (O(N) SSM)
+- **Cayley-Soliton Propagator**: Unitary wave propagation through learned Graph Laplacian
+- **Born Collapse Sampler**: Wavefunction → token probabilities via |ψ|² (quantum-inspired)
 
-| Wave | ID | Task | Subagent | Dependencies | Status |
-|------|----|------|----------|--------------|--------|
-| 0 | T0 | Environment Prep (XPU Torch) | executor | None | COMPLETED |
-| 0 | T0a | XPU Verification & Runtime Fix | executor-high | T0 | COMPLETED |
-| 1 | T1 | RealBlockLinear Primitive | executor-high | None | COMPLETED |
-| 1 | T2 | Real-Block Complex Ops | executor-high | None | COMPLETED |
-| 2 | T3 | SSM Scan Refactor | executor-high | T1, T2 | COMPLETED |
-| 2 | T4 | ComplexRMSNorm Refactor | executor | T2 | COMPLETED |
-| 2 | T5 | MESH Encoder Lift Refactor | executor | T2 | COMPLETED |
-| 3 | T6 | Hamiltonian Sparse Matvec | executor-high | T2 | COMPLETED |
-| 3 | T7 | CG Solver Real-Math | executor-high | T2 | COMPLETED |
-| 4 | T8 | Cayley Propagator Fusion | executor-high | T6, T7 | COMPLETED |
-| 5 | T9 | ComplexAdamW Float32 Pair | executor-high | All Above | COMPLETED |
-| 5 | T9a | Zipf-weighted MESH & Unitary Loss | executor-high | T9 | COMPLETED |
-| 5 | T9b | Unitary Stability Curriculum | executor-high | T9a | COMPLETED |
-| 6 | T10 | Trainer XPU & RAM Aggression | executor | All Above | COMPLETED |
-| 6 | T10a | Final Pipeline Validation | executor | T0a, T10 | COMPLETED |
-| 6 | T10b | Launch Max Aggression Training | executor | T10a | COMPLETED |
-| 7 | T11 | Revert Broken SEOP Optimizations | executor | T10b | COMPLETED |
-| 7 | T12 | Local XPU/CPU Validation Test | executor | T11 | COMPLETED |
-| 8 | T13 | Push Commits & Launch HF Job | executor | T12 | IN_PROGRESS |
+The architecture operates entirely in **complex64** space (or Real-Block Isomorphism for XPU support), maintaining unitarity constraints throughout the forward pass.
 
-### 3. Detailed Subtasks & Completion Summary
+## Key Files
 
-#### Wave 0: Environment (T0, T0a) - COMPLETED
-- **T0** (COMPLETED): Install `torch==2.10.0+xpu` wheel ✓
-- **T0a** (COMPLETED): 
-  - Subtask 1: `torch.xpu.is_available()` returns True ✓
-  - Subtask 2: Level Zero loader (`ze_loader.dll`) found in System32 ✓
-  - Subtask 3: Intel runtime libraries installed (intel_sycl_rt, intel_opencl_rt) ✓
-  - Subtask 4: Installed torch==2.10.0+xpu from PyTorch XPU index ✓
+| File | Description |
+|------|-------------|
+| `pyproject.toml` | Package definition, dependencies (torch, scipy, einops) |
+| `hf_train.py` | Standalone HuggingFace training script (non-Lightning) |
+| `hf_train_lightning.py` | PyTorch Lightning training with XPU/accelerator support |
+| `launch_job.py` | Launch training jobs on HuggingFace Spaces |
+| `push_to_hub.py` | Upload code/checkpoints to HuggingFace Hub |
+| `test_xpu_local.py` | Local validation script for XPU/CPU testing |
+| `Dockerfile` | Container build for cloud training |
+| `uv.lock` | Locked dependencies for reproducible builds |
 
-#### Wave 1-5: Real-Block Refactor (T1-T9b) - COMPLETED
-- **T1, T2** (COMPLETED): Foundation primitives ✓
-- **T3, T4, T5** (COMPLETED): Component layers ✓
-- **T6, T7** (COMPLETED): Solvers ✓
-- **T8** (COMPLETED): Integration ✓
-- **T9, T9a, T9b** (COMPLETED): Optimizer & SEOP enhancements ✓
+## Subdirectories
 
-#### Wave 6: Training Infrastructure (T10, T10a, T10b) - COMPLETED
-- **T10** (COMPLETED): 
-  - Subtask 1: Add XPU device detection to train.py ✓
-  - Subtask 2: Implement max aggression config (16GB RAM + 8GB VRAM) ✓
-  - Subtask 3: Reduced logging spam (set most modules to WARNING level) ✓
-  - Subtask 4: torch.compile disabled for XPU (requires C++ compiler for Triton) ✓
-  - Subtask 5: Reduced num_workers from 12 to 6 (avoid DataLoader warnings) ✓
-- **T10a** (COMPLETED): 
-  - Subtask 1: Dry run with synthetic data - 10 steps completed successfully ✓
-  - Subtask 2: (tokens, token_freqs) format works end-to-end ✓
-  - Subtask 3: UnitaryBornLoss computes without NaN/Inf (loss decreased 8.5→3.8) ✓
-- **T10b** (COMPLETED): 
-  - Subtask 1: Training launched on XPU with max aggression config ✓
-  - Subtask 2: Model builds successfully (29.9M parameters) ✓
-  - Subtask 3: Tokenizer trained on FineWeb-Edu (32,768 vocab) ✓
+| Directory | Purpose |
+|-----------|---------|
+| `sem/` | Core Python package - model, training, components (see `sem/AGENTS.md`) |
+| `configs/` | YAML configuration files for different hardware profiles (see `configs/AGENTS.md`) |
+| `tests/` | Pytest test suite for components (see `tests/AGENTS.md`) |
+| `lean4/` | Lean 4 formal verification proofs (see `lean4/AGENTS.md`) |
+| `.github/` | CI/CD workflows |
+| `.sisyphus/` | Persistent planning documents (SEOP fixes, execution plans) |
 
-#### Wave 7: Post-SEOP Stabilization (T11, T12) - COMPLETED
-- **T11** (COMPLETED):
-  - Subtask 1: Identified NaN loss cause from SEOP "optimizations" ✓
-  - Subtask 2: Reverted CG solver stop-gradient wrapper → implicit differentiation restored ✓
-  - Subtask 3: Reverted Mamba parallel scan → sequential O(S) loop restored ✓
-  - Subtask 4: Kept cg_max_iter=3 optimization (safe) ✓
-  - Subtask 5: Added seamless XPU/CUDA/CPU auto-detection in hf_train.py ✓
-  - Subtask 6: Committed and pushed fixes (commit 0819bc3) ✓
-- **T12** (COMPLETED):
-  - Subtask 1: Created test_xpu_local.py validation script ✓
-  - Subtask 2: Fixed Windows Unicode encoding issues ✓
-  - Subtask 3: Ran local test - No NaN loss detected ✓
-  - Subtask 4: Verified gradients flow correctly ✓
-  - Subtask 5: Model builds successfully (~573K params for test config) ✓
-  - Subtask 6: Committed test file (commit 3a20325) ✓
-- **T13** (IN_PROGRESS):
-  - Subtask 1: Uploaded code to HF Hub repo (icarus112/sem-v55-lean-crystal) ✓
-  - Subtask 2: Launched HF Job on L40S (ID: 698013276f80a03a5692fc67) ✓
-  - Subtask 3: Created monitor_job.py for tracking ✓
-  - Subtask 4: Push git commits (5 ahead, network timeout - will retry) ⏳
+## For AI Agents
 
-### 4. Training Command
+### Working In This Directory
 
-To run the full training:
+- **ALWAYS use `uv`** for package management: `uv pip install`, `uv run`, `uv sync`
+- **PREFER `task` tool** for complex multi-file work
+- **Training scripts**: Use `hf_train_lightning.py` for production (XPU/accelerator support)
+- **Config selection**: Match config to target hardware (see `configs/`)
+
+### Architecture Overview
+
+```
+Token IDs → [MESH Encoder] → ψ (complex) → [Mamba Layers] → ψ' → [Cayley Propagator] → ψ'' → [Born Collapse] → Logits
+              Sinkhorn OT      B,S,D          SSM scan       B,S,D    CG solve + unitary    B,S,D    |ψ|²         B,S,V
+```
+
+### Testing Requirements
 
 ```bash
-# Set HuggingFace token for dataset access (use your own token)
-set HF_TOKEN=hf_YOUR_TOKEN_HERE
+# Run full test suite
+uv run pytest tests/ -v
 
-# Run training (use venv Python directly, NOT uv run)
-.venv/Scripts/python -m sem.train --config configs/max_aggression.yaml --device xpu --max-aggression
+# Run specific component tests
+uv run pytest tests/test_cayley.py -v
+uv run pytest tests/test_born.py -v
 ```
 
-### 5. Key Metrics Output
+### Common Patterns
 
-Training will output clean metrics every 5 steps:
-```
-20:35:35 [INFO] Building SEM V5.5 model...
-20:35:36 [INFO] Parameters: 29,918,896 effective real
-20:35:51 [INFO] torch.compile disabled for XPU (eager mode)
-Step 10: loss=8.5234 | lr=0.000012 | grad_norm=1.2345 | tok/s=1250
-Step 15: loss=6.1234 | lr=0.000018 | grad_norm=0.9876 | tok/s=1320
-...
-```
+- **Complex tensors**: Use `torch.complex64` dtype, Real-Block for XPU
+- **Config loading**: `SEMConfig.from_yaml("configs/default.yaml")`
+- **Model instantiation**: `SEMModel(config)`
+- **Unitary loss**: `unitary_lambda * (log(sum(|ψ|²)))²` term in loss
 
-### 6. Notes
+## Dependencies
 
-- **XPU torch**: torch==2.10.0+xpu installed (NOT uv run which switches to CPU)
-- **Tokenizer**: Trained on 50k FineWeb-Edu documents, 32,768 vocab size
-- **Logging**: Reduced to WARNING for most modules, INFO for training metrics only
-- **torch.compile**: Disabled for XPU (requires CXX compiler for Triton kernels)
-- **num_workers**: Reduced from 12 to 6 to avoid DataLoader rationality warnings
-- **Model**: 29.9M effective real parameters, ~100M parameter equivalent
+### Internal
+- `sem/` - All model components
+- `configs/` - Hardware-specific configurations
 
-### 7. Current Blockers
-NONE - All tasks completed. Ready for full training run.
+### External
+- `torch>=2.2.0` - Core tensor operations
+- `scipy>=1.11.0` - Sparse matrix operations (Laplacian)
+- `einops>=0.7.0` - Tensor rearrangement
+- `lightning` - Training framework (optional)
+- `datasets`, `transformers`, `tokenizers` - HuggingFace ecosystem
 
-### 8. Successful Flow - COMPLETED
-1. ✓ Environment: XPU torch installed and verified
-2. ✓ Foundation: Primitives (T1, T2) established
-3. ✓ Component Refactor: Layers (T3-T5) and Solvers (T6-T8) updated
-4. ✓ Optimization: Optimizer (T9), SEOP enhancements (T9a, T9b), Training Config (T10)
-5. ✓ Validation: Dry-run verified (T10a), Training launched (T10b)
-6. ✓ Stabilization: Reverted broken SEOP optimizations (T11), Local validation passed (T12)
+## Hardware Support
 
-## Project Status: **READY FOR HF DEPLOYMENT**
+| Target | Config | Notes |
+|--------|--------|-------|
+| Intel XPU | `xpu_optimized.yaml` | Real-Block Isomorphism, eager mode |
+| NVIDIA A10G | `a10g_speed.yaml` | torch.compile, mixed precision |
+| NVIDIA L40S | `l40s_full.yaml` | Full precision, large batch |
+| NVIDIA A100 | `a100_optimized.yaml` | Maximum throughput |
+| CPU/Edge | `edge.yaml` | Reduced dimensions, no compile |
 
-Note: Local XPU test passed on CPU (XPU hardware not available in current environment). For actual XPU training, use HF Jobs with valid HF_TOKEN.
+<!-- MANUAL: Task tracking and project-specific notes below -->
+
+## Task Tracker (Historical)
+
+### Project: Real-Block Isomorphism (XPU Support) - COMPLETED
+
+All waves completed successfully:
+- Wave 0: Environment (XPU torch installed)
+- Wave 1-5: Real-Block Refactor (all primitives, layers, solvers)
+- Wave 6: Training Infrastructure
+- Wave 7: Post-SEOP Stabilization
+
+**Status: READY FOR HF DEPLOYMENT**
+
+### Recent SEOP Fixes
+
+- **SEOP Fix 29**: XPU stability - pit_gamma soliton envelope, precision plugin, warm restarts
+- CG solver implicit differentiation restored
+- Sequential Mamba scan (O(S)) - numerical stability over parallel

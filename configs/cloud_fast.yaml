@@ -49,7 +49,7 @@ training:
   weight_decay: 0.1
   warmup_steps: 100
   max_steps: 3000  # Reduced for 1-hour target
-  gradient_clip: 1.0
+  gradient_clip: 5.0
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
   num_workers: 2

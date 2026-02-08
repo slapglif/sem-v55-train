@@ -28,7 +28,6 @@ runs/
 checkpoints/
 
 # Tokenizer (large file)
-tokenizer/tokenizer.json
 tokenizer/*.model
 
 # Logs
@@ -58,10 +57,10 @@ Thumbs.db
 venv/
 ENV/
 
-# Test outputs
-test_*.py
+# Test outputs (scripts at repo root)
+/test_*.py
 !test_xpu_local.py
-profile_*.py
+/profile_*.py
 
 # OMC/Agent
 .omc/

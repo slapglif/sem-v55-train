@@ -45,7 +45,7 @@ training:
   weight_decay: 0.01
   warmup_steps: 2000
   max_steps: 100000
-  gradient_clip: 1.0
+  gradient_clip: 5.0
   gradient_checkpointing: false  # Disabled - causes tensor count mismatch bug
 
   # Data

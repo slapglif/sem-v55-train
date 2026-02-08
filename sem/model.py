@@ -102,9 +102,13 @@ class SEMModel(nn.Module):
         # instead of spending thousands of steps learning token frequencies.
         with torch.no_grad():
             # Approximate Zipf: log(1/(rank+1)) for rank 0..V-1
-            ranks = torch.arange(1, self.config.model.vocab_size + 1, dtype=torch.float32)
+            ranks = torch.arange(
+                1, self.config.model.vocab_size + 1, dtype=torch.float32
+            )
             log_freqs = -torch.log(ranks)
-            log_freqs = log_freqs - log_freqs.logsumexp(0)  # normalize to valid log-probs
+            log_freqs = log_freqs - log_freqs.logsumexp(
+                0
+            )  # normalize to valid log-probs
             self.sampler.output_bias.data.copy_(log_freqs)
 
         # SEOP Fix 45: Propagator warmup bypass for 3x throughput during early training
@@ -144,8 +148,22 @@ class SEMModel(nn.Module):
         # 4. Final norm
         psi = self.final_norm(psi)  # [B, S, D] complex64
 
+        # Unitarity regularization / monitoring.
+        # Keep the wavefunction energy per token near its expected scale.
+        # We normalize by hidden_dim so the expected value is ~1.0.
+        psi_energy = (psi.real * psi.real + psi.imag * psi.imag).sum(dim=-1)  # [B,S]
+        psi_energy_norm = psi_energy / float(self.config.model.hidden_dim)
+        # SEOP Fix 35: Clamp psi_energy_norm before log² to prevent quadratic
+        # explosion when propagator amplifies ψ after warmup (gradient death at step 2180).
+        # Without clamping, log(large)² grows without bound → dominates loss → clips all gradients.
+        psi_energy_norm_clamped = torch.clamp(psi_energy_norm, min=1e-3, max=10.0)
+        unitary_divergence = (torch.log(psi_energy_norm_clamped) ** 2).mean()
+
         # 5. Collapse: log-linear projection (SEOP Fix 48)
         output = self.sampler(psi, sample=not self.training)
+
+        # Expose monitoring metric for trainers/curriculum.
+        output["unitary_divergence"] = unitary_divergence
 
         # Compute loss if targets provided
         if targets is not None:
@@ -157,6 +175,11 @@ class SEMModel(nn.Module):
                 target_ids.view(-1),
                 label_smoothing=self.config.training.label_smoothing,
             )
+
+            # Apply unitarity regularization strength from config.
+            unitary_lambda = float(getattr(self.config.training, "unitary_lambda", 0.0))
+            if unitary_lambda != 0.0:
+                loss = loss + unitary_lambda * unitary_divergence
             output["loss"] = loss
 
         return output
@@ -197,6 +220,7 @@ class SEMModel(nn.Module):
         temperature: float = 1.0,
         top_k: int = 50,
         top_p: float = 0.95,
+        eos_token_id: Optional[int] = 1,
     ) -> Tensor:
         """Autoregressive generation.
 
@@ -212,6 +236,10 @@ class SEMModel(nn.Module):
         """
         self.eval()
         generated = prompt_ids.clone()
+
+        finished = torch.zeros(
+            generated.shape[0], device=generated.device, dtype=torch.bool
+        )
 
         for _ in range(max_new_tokens):
             # Crop to max sequence length
@@ -232,9 +260,23 @@ class SEMModel(nn.Module):
 
             # Get next token (last position)
             next_token = output["tokens"][:, -1:]
+
+            if eos_token_id is not None:
+                # If some sequences already finished, keep emitting EOS for them.
+                eos = torch.tensor(
+                    int(eos_token_id), device=generated.device, dtype=next_token.dtype
+                )
+                next_token = torch.where(
+                    finished.view(-1, 1),
+                    eos.view(1, 1).expand_as(next_token),
+                    next_token,
+                )
             generated = torch.cat([generated, next_token], dim=1)
 
-            # TODO: EOS detection
+            if eos_token_id is not None:
+                finished = finished | (next_token.squeeze(-1) == int(eos_token_id))
+                if bool(finished.all()):
+                    break
 
         return generated
 

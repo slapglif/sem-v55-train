@@ -146,7 +146,7 @@ class MHCResidual(nn.Module):
 
             # Apply residual mixing: H_res @ residual
             # [1, 1] @ [B, ..., 1, D] -> [B, ..., 1, D]
-            residual_mixed = torch.einsum('ss,...sd->...sd', H_res, residual_expanded)
+            residual_mixed = torch.einsum("ss,...sd->...sd", H_res, residual_expanded)
 
             # Apply output routing: beta * branch_output
             # [1] * [B, ..., D] -> [B, ..., 1, D]
@@ -159,7 +159,7 @@ class MHCResidual(nn.Module):
             # Multi-stream case
             # residual: [B, ..., S, D]
             # Apply residual mixing
-            residual_mixed = torch.einsum('st,...td->...sd', H_res, residual)
+            residual_mixed = torch.einsum("st,...td->...sd", H_res, residual)
 
             # Apply output routing
             # branch_output: [B, ..., D] -> [B, ..., S, D]
@@ -199,6 +199,7 @@ class SimpleMHC(nn.Module):
     def __init__(
         self,
         dim: int,
+        num_streams: int = 4,
         mhc_num_iters: int = 10,
         mhc_tau: float = 0.05,
         complex_mode: bool = True,
@@ -206,18 +207,41 @@ class SimpleMHC(nn.Module):
     ):
         super().__init__()
         self.dim = dim
+        self.num_streams = num_streams
         self.mhc_num_iters = mhc_num_iters
         self.mhc_tau = mhc_tau
         self.complex_mode = complex_mode
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        # H_res: Single mixing matrix (will be projected to identity via Sinkhorn)
-        # Initialize as identity (no mixing at start)
-        # For single-element matrix: [[0.0]] -> Sinkhorn -> [[1.0]]
-        self.H_res_logits = nn.Parameter(torch.zeros(1, 1))
+        # We keep a single-stream *interface* (residual, branch_output) -> updated residual,
+        # but internally we partition channels into multiple streams so the Birkhoff/Sinkhorn
+        # constraint is meaningful (a 1x1 Sinkhorn projection is constant and would yield
+        # zero gradients for H_res_logits).
+        if self.num_streams < 1:
+            raise ValueError("num_streams must be >= 1")
+        if self.dim % self.num_streams != 0:
+            raise ValueError(
+                f"dim ({self.dim}) must be divisible by num_streams ({self.num_streams})"
+            )
+        self._stream_dim = self.dim // self.num_streams
+
+        # H_res: learnable stream-mixing matrix projected onto the Birkhoff polytope.
+        # Initialize mildly diagonal-dominant for a stable start WITHOUT saturating Sinkhorn.
+        # With tau=0.05, very negative off-diagonals (e.g. -8.0) become ~-160 after scaling
+        # and can underflow exp(), yielding near-exact identity and zero gradients.
+        # NOTE: we want H close to identity for a residual-like start, but not so sharp
+        # that Sinkhorn saturates and gradients vanish.
+        init_h = torch.full((self.num_streams, self.num_streams), -0.25)
+        init_h.fill_diagonal_(0.0)
+        self.H_res_logits = nn.Parameter(init_h)
 
         if complex_mode:
-            self.H_res_logits_imag = nn.Parameter(torch.zeros(1, 1))
+            self.H_res_logits_imag = nn.Parameter(init_h.clone())
+
+        # Per-stream branch injection gain. We avoid softmax normalization here because
+        # streams are channel partitions (not duplicated parallel residual streams).
+        # Using beta ~= 1 preserves the expected x + branch behavior.
+        self.beta_logits = nn.Parameter(torch.zeros(self.num_streams))
 
     def forward(self, residual: Tensor, branch_output: Tensor) -> Tensor:
         """Apply simplified mHC residual.
@@ -234,10 +258,6 @@ class SimpleMHC(nn.Module):
         Returns:
             [B, T, D]
         """
-        # For single stream, Sinkhorn projection returns [[1.0]]
-        # So this is effectively: x' = 1.0 * x + branch_output = x + branch_output
-        # The benefit is that we can extend to multi-stream by changing H_res_logits size
-
         if self.complex_mode:
             H_real, H_imag = sinkhorn_log_complex(
                 self.H_res_logits,
@@ -253,11 +273,23 @@ class SimpleMHC(nn.Module):
                 tau=self.mhc_tau,
             )
 
-        # H is [1, 1], residual is [B, T, D]
-        # torch.einsum('ss,btd->btd', H, residual) with s=1 is just H[0,0] * residual
-        residual_weighted = H[0, 0] * residual
+        # Partition channels into streams: [B, T, D] -> [B, T, S, Ds]
+        # Then apply stream mixing H:[S,S] to the stream axis.
+        b, t, d = residual.shape
+        if d != self.dim:
+            raise ValueError(f"Expected residual last-dim={self.dim}, got {d}")
+        residual_s = residual.view(b, t, self.num_streams, self._stream_dim)
+        mixed_s = torch.einsum("ij,btjd->btid", H, residual_s)
+        mixed = mixed_s.reshape(b, t, d)
 
-        output = residual_weighted + branch_output
+        # Branch injection (per-channel-partition gain). beta in (0, 2) with beta=1 at init.
+        beta = 2.0 * torch.sigmoid(self.beta_logits).to(dtype=branch_output.dtype)
+        branch_s = branch_output.view(b, t, self.num_streams, self._stream_dim)
+        branch_weighted = (beta.view(1, 1, self.num_streams, 1) * branch_s).reshape(
+            b, t, d
+        )
+
+        output = mixed + branch_weighted
         return self.dropout(output)
 
 
@@ -301,7 +333,11 @@ def mhc_residual(
         branch_imag = branch_output.imag
 
         # Use provided imaginary logits or fall back to zeros
-        imag_logits = H_res_logits_imag if H_res_logits_imag is not None else torch.zeros_like(H_res_logits)
+        imag_logits = (
+            H_res_logits_imag
+            if H_res_logits_imag is not None
+            else torch.zeros_like(H_res_logits)
+        )
 
         H_real, H_imag = sinkhorn_log_complex(
             H_res_logits,

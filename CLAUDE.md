@@ -3,6 +3,7 @@
 - **ALWAYS use `uv` for package management** (never pip). Use `uv pip install`, `uv run`, `uv sync`, etc.
 - **PREFER the `task` tool** for all non-trivial, multi-file, or complex implementation tasks.
 - **DELEGATE liberally** to specialized subagents via the `task` tool to maintain high throughput and quality.
+- **ALWAYS use foreground (blocking) Task calls** — never use `run_in_background: true` unless explicitly instructed by the user.
 
 ---
 

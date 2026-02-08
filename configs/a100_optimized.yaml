@@ -53,7 +53,7 @@ training:
   weight_decay: 0.01
   warmup_steps: 2000
   max_steps: 100000
-  gradient_clip: 1.0
+  gradient_clip: 5.0
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
   num_workers: 8

@@ -51,7 +51,7 @@ training:
   decay_steps: 5000
   dtype: float32
   gradient_checkpointing: false  # Disabled - tensor mismatch bug
-  gradient_clip: 1.0
+  gradient_clip: 5.0
   health_check_interval: 100
   keep_checkpoints: 3
   learning_rate: 0.0003

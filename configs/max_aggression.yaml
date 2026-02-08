@@ -61,7 +61,7 @@ training:
   weight_decay: 0.05     # Reduced from 0.1 to prevent over-regularization
   warmup_steps: 2000     # Reduced from 8000 for faster convergence start
   max_steps: 100000
-  gradient_clip: 0.5     # Increased from 0.2 for more tolerance to gradient spikes
+  gradient_clip: 5.0     # SEOP Fix 35: raised from 0.5 — prevents gradient death after warmup
   unitary_lambda: 0.01   # Increased from 0.005 for stronger unitarity enforcement
 
 

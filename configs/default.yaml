@@ -44,5 +44,5 @@ training:
   weight_decay: 0.01
   warmup_steps: 1000
   max_steps: 100000
-  gradient_clip: 1.0
+  gradient_clip: 5.0
   dtype: complex64
