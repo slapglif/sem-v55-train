@@ -436,7 +436,14 @@ class SEMV8Model(nn.Module):
         # Unitarity monitoring/regularization (shared with v5.5).
         psi_energy = (psi.real * psi.real + psi.imag * psi.imag).sum(dim=-1)  # [B,S]
         psi_energy_norm = psi_energy / float(self.config.model.hidden_dim)
-        unitary_divergence = (torch.log(psi_energy_norm + 1e-12) ** 2).mean()
+        # SEOP Fix 35: Clamp psi_energy_norm before log² to prevent quadratic
+        # explosion when propagator amplifies ψ after warmup (gradient death at step 2180).
+        psi_energy_norm_clamped = torch.clamp(
+            psi_energy_norm,
+            min=self.config.training.unitary_clamp_min,
+            max=self.config.training.unitary_clamp_max,
+        )
+        unitary_divergence = (torch.log(psi_energy_norm_clamped) ** 2).mean()
 
         # 5. Born collapse
         output = self.sampler(psi, sample=not self.training)
@@ -455,7 +462,8 @@ class SEMV8Model(nn.Module):
 
             unitary_lambda = float(getattr(self.config.training, "unitary_lambda", 0.0))
             if unitary_lambda != 0.0:
-                loss = loss + unitary_lambda * unitary_divergence
+                # SEOP Fix 34: Detach unitary_divergence from gradient graph.
+                loss = loss + unitary_lambda * unitary_divergence.detach()
 
             # Add unitarity regularization from HybridAutomata layers
             for layer in self.mamba_layers:

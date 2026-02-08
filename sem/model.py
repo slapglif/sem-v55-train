@@ -166,7 +166,11 @@ class SEMModel(nn.Module):
         # SEOP Fix 35: Clamp psi_energy_norm before log² to prevent quadratic
         # explosion when propagator amplifies ψ after warmup (gradient death at step 2180).
         # Without clamping, log(large)² grows without bound → dominates loss → clips all gradients.
-        psi_energy_norm_clamped = torch.clamp(psi_energy_norm, min=1e-3, max=10.0)
+        psi_energy_norm_clamped = torch.clamp(
+            psi_energy_norm,
+            min=self.config.training.unitary_clamp_min,
+            max=self.config.training.unitary_clamp_max,
+        )
         unitary_divergence = (torch.log(psi_energy_norm_clamped) ** 2).mean()
 
         # 5. Collapse: log-linear projection (SEOP Fix 48)

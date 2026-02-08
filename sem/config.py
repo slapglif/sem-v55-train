@@ -103,6 +103,12 @@ class TrainingConfig:
     unitary_lambda: float = (
         0.01  # SEOP Fix 35: reduced from 0.1 — Cayley enforces unitarity structurally
     )
+    unitary_clamp_min: float = (
+        1e-3  # SEOP Fix 35: lower bound for psi energy norm clamping
+    )
+    unitary_clamp_max: float = (
+        10.0  # SEOP Fix 35: upper bound for psi energy norm clamping
+    )
     low_vram_mode: bool = False
     born_chunk_size: int = 2048
 

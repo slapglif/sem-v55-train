@@ -153,14 +153,14 @@ class GraphLaplacianHamiltonian(nn.Module):
             self._cached_sparse_A = None
         else:
             self._cached_dense_A = None
-            # Issue #1 fix: Cache the sparse COO tensor to avoid rebuilding
+            # Issue #1 fix: Cache sparse tensor (CSR on CUDA) to avoid rebuilding
             # + coalesce() on every matvec call. The indices are fixed (topology
             # doesn't change), only weights change per forward pass.
             w_sym = torch.cat([self._cached_w, self._cached_w])
             idx = self._sparse_idx_sym
             self._cached_sparse_A = torch.sparse_coo_tensor(
                 idx, w_sym, (D, D)
-            ).coalesce()
+            ).coalesce().to_sparse_csr()
 
     def clear_cache(self):
         """Clear cached weights."""
