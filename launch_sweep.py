@@ -29,7 +29,7 @@ pip install -q uv 2>&1 | tail -1
 uv pip install --system datasets tokenizers pyyaml scipy einops optuna 'huggingface_hub[hf_xet]' rich
 
 banner "[2/4] Downloading model repo..."
-REPO_PATH=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('icarus112/sem-v55-lean-crystal', repo_type='model'))")
+REPO_PATH=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('icarus112/sem-v55-lean-crystal', repo_type='model', force_download=True))")
 cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
