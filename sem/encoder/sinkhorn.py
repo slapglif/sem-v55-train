@@ -8,6 +8,7 @@ The Sinkhorn algorithm solves the entropy-regularized OT problem:
     min_T <C, T> - epsilon * H(T)
     s.t. T @ 1 = r, T^T @ 1 = c
 """
+
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -22,16 +23,27 @@ class LogSinkhorn(nn.Module):
     subject to marginal constraints.
     """
 
-    def __init__(self, epsilon: float = 0.05, max_iter: int = 50,
-                 tol: float = 1e-3):
+    def __init__(
+        self,
+        epsilon: float = 0.05,
+        max_iter: int = 50,
+        tol: float = 1e-3,
+        auto_epsilon: bool = False,
+        auto_epsilon_scale: float = 0.05,
+    ):
         super().__init__()
         self.epsilon = epsilon
         self.max_iter = max_iter
         self.tol = tol
+        self.auto_epsilon = auto_epsilon
+        self.auto_epsilon_scale = auto_epsilon_scale
 
-    def forward(self, cost: Tensor,
-                source_marginal: Optional[Tensor] = None,
-                target_marginal: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        cost: Tensor,
+        source_marginal: Optional[Tensor] = None,
+        target_marginal: Optional[Tensor] = None,
+    ) -> Tensor:
         """Compute optimal transport plan via log-domain Sinkhorn.
 
         Args:
@@ -57,8 +69,16 @@ class LogSinkhorn(nn.Module):
         else:
             log_c = (target_marginal + 1e-12).log()
 
-        # Log kernel: log K = -C / epsilon
-        log_K = -cost / self.epsilon  # [B, N, M]
+        # Cost-aware epsilon: scale to median of cost matrix per batch element
+        if self.auto_epsilon:
+            cost_flat = cost.reshape(B, -1)
+            median_cost = cost_flat.median(dim=-1).values.clamp(min=1e-6)  # [B]
+            eps = (
+                (self.auto_epsilon_scale * median_cost).unsqueeze(-1).unsqueeze(-1)
+            )  # [B,1,1]
+            log_K = -cost / eps
+        else:
+            log_K = -cost / self.epsilon  # [B, N, M]
 
         # Initialize dual variables
         log_u = torch.zeros(B, N, device=device, dtype=dtype)  # [B, N]

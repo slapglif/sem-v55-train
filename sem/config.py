@@ -23,6 +23,8 @@ class EncoderConfig:
     sinkhorn_epsilon: float = 0.05
     sinkhorn_max_iter: int = 50
     sinkhorn_tol: float = 1e-3
+    sinkhorn_auto_epsilon: bool = False  # Scale ε to median(cost) at runtime
+    sinkhorn_auto_epsilon_scale: float = 0.05  # ε = scale * median(cost)
     soft_sparse: bool = (
         True  # SEOP Fix 48: Enable gradient flow to all codebook entries
     )
@@ -37,6 +39,9 @@ class SpinorConfig:
     state_dim: int = 64
     mimo_groups: int = 8
     d_conv: int = 4
+    memory_horizon_ratio: float = (
+        0.0  # τ = ratio * max_seq_length; 0 = use default init (-4.55 ≈ S/e for S=256)
+    )
 
 
 @dataclass
@@ -50,6 +55,12 @@ class PropagatorConfig:
     lazy_cg_tol: float = 1e-6  # Residual gate tolerance for lazy CG
     direct_solve: bool = False
     pit_gamma: float = 1.0  # Soliton envelope width (SEOP Fix 29)
+    adaptive_cg_tol: bool = False
+    cg_tol_warmup: float = 1e-4  # Loose tolerance during warmup
+    cg_tol_mid: float = 1e-5  # Mid-training tolerance
+    cg_tol_late: float = 1e-6  # Tight tolerance for convergence
+    cg_tol_warmup_end: int = 2000  # Step to switch warmup → mid
+    cg_tol_mid_end: int = 50000  # Step to switch mid → late
 
 
 @dataclass

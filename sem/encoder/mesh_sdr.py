@@ -40,6 +40,8 @@ class MESHEncoder(nn.Module):
         sinkhorn_epsilon: float = 0.05,
         sinkhorn_max_iter: int = 50,
         sinkhorn_tol: float = 1e-3,
+        sinkhorn_auto_epsilon: bool = False,
+        sinkhorn_auto_epsilon_scale: float = 0.05,
         max_seq_length: int = 2048,
         low_vram_mode: bool = False,
         soft_sparse: bool = False,
@@ -68,14 +70,19 @@ class MESHEncoder(nn.Module):
             # Re(z) = embedding (stays in embedding space for weight tying).
             # Im(z) = learned projection (additional capacity for phase dynamics).
             self.imag_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
-            nn.init.xavier_uniform_(self.imag_proj.weight, gain=0.3)  # Small Im channel — let model learn phase magnitude
+            nn.init.xavier_uniform_(
+                self.imag_proj.weight, gain=0.3
+            )  # Small Im channel — let model learn phase magnitude
         else:
             # Cost matrix module
             self.cost = LearnedCostMatrix(hidden_dim, sdr_candidates)
 
-            # Sinkhorn OT solver
             self.sinkhorn = LogSinkhorn(
-                epsilon=sinkhorn_epsilon, max_iter=sinkhorn_max_iter, tol=sinkhorn_tol
+                epsilon=sinkhorn_epsilon,
+                max_iter=sinkhorn_max_iter,
+                tol=sinkhorn_tol,
+                auto_epsilon=sinkhorn_auto_epsilon,
+                auto_epsilon_scale=sinkhorn_auto_epsilon_scale,
             )
 
             # Projection from SDR candidates back to hidden_dim
@@ -83,7 +90,8 @@ class MESHEncoder(nn.Module):
 
             # Positional phase encoding for complex lift
             self.register_buffer(
-                "positional_phase", self._build_positional_phase(max_seq_length, hidden_dim)
+                "positional_phase",
+                self._build_positional_phase(max_seq_length, hidden_dim),
             )
 
     def _build_positional_phase(self, max_len: int, dim: int) -> Tensor:

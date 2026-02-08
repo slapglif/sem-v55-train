@@ -22,6 +22,7 @@ class GraphLaplacianHamiltonian(nn.Module):
     edge_weights: nn.Parameter
     _cached_w: Tensor | None
     _cached_degree: Tensor | None
+    _cached_sparse_A: Tensor | None
 
     """Learnable sparse Graph Laplacian Hamiltonian.
 
@@ -49,6 +50,7 @@ class GraphLaplacianHamiltonian(nn.Module):
         self._cached_w = None
         self._cached_degree = None
         self._cached_dense_A = None
+        self._cached_sparse_A = None
         # SEOP Fix 24: Pre-build symmetric sparse indices to avoid reconstruction
         self._cached_sparse_idx: Tensor | None = None
         self.register_buffer("_sparse_idx_sym", self._build_symmetric_indices(edges))
@@ -148,14 +150,24 @@ class GraphLaplacianHamiltonian(nn.Module):
             A_dense[rows, cols] = self._cached_w
             A_dense[cols, rows] = self._cached_w
             self._cached_dense_A = A_dense
+            self._cached_sparse_A = None
         else:
             self._cached_dense_A = None
+            # Issue #1 fix: Cache the sparse COO tensor to avoid rebuilding
+            # + coalesce() on every matvec call. The indices are fixed (topology
+            # doesn't change), only weights change per forward pass.
+            w_sym = torch.cat([self._cached_w, self._cached_w])
+            idx = self._sparse_idx_sym
+            self._cached_sparse_A = torch.sparse_coo_tensor(
+                idx, w_sym, (D, D)
+            ).coalesce()
 
     def clear_cache(self):
         """Clear cached weights."""
         self._cached_w = None
         self._cached_degree = None
         self._cached_dense_A = None
+        self._cached_sparse_A = None
 
     def get_diagonal(self) -> Tensor:
         """Get diagonal of Laplacian H: diag(H) = degree vector.
@@ -219,9 +231,11 @@ class GraphLaplacianHamiltonian(nn.Module):
                 A_dense[cols, rows] = w
             Av_flat = v_flat @ A_dense.t()
         else:
-            # SEOP Fix 24: Use pre-built symmetric indices to avoid reconstruction
-            idx = self._sparse_idx_sym
-            A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
+            if self._cached_sparse_A is not None:
+                A_sparse = self._cached_sparse_A
+            else:
+                idx = self._sparse_idx_sym
+                A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
             Av_flat = torch.sparse.mm(A_sparse, v_flat.t()).t()
 
         res = Av_flat.reshape(*batch_shape, D)
@@ -275,10 +289,12 @@ class GraphLaplacianHamiltonian(nn.Module):
                 A_dense[cols, rows] = w
             Av_combined = v_combined @ A_dense.t()
         else:
-            # SEOP Fix 24: Use pre-built symmetric indices to avoid reconstruction
-            idx = self._sparse_idx_sym
-            w_sym = torch.cat([w, w])
-            A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
+            if self._cached_sparse_A is not None:
+                A_sparse = self._cached_sparse_A
+            else:
+                idx = self._sparse_idx_sym
+                w_sym = torch.cat([w, w])
+                A_sparse = torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce()
             Av_combined = torch.sparse.mm(A_sparse, v_combined.t()).t()
 
         Avr_flat, Avi_flat = Av_combined.split(vr_flat.shape[0], dim=0)

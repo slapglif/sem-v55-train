@@ -56,6 +56,8 @@ class ComplexSSMState(nn.Module):
         state_dim: int,
         mimo_groups: int = 1,
         use_mixed_precision_a: bool = True,
+        memory_horizon_ratio: float = 0.0,
+        max_seq_length: int = 256,
     ):
         """
         Args:
@@ -64,6 +66,8 @@ class ComplexSSMState(nn.Module):
             mimo_groups: Number of MIMO groups G
             use_mixed_precision_a: If True, use bfloat16 for A tensor in pscan
                 (reduces memory bandwidth by 25%, <1% error). Default True.
+            memory_horizon_ratio: τ/S ratio for memory horizon init. 0 = default (S/e).
+            max_seq_length: Used with memory_horizon_ratio to compute init.
         """
         super().__init__()
         self.d_input = d_input
@@ -72,20 +76,17 @@ class ComplexSSMState(nn.Module):
         self.use_mixed_precision_a = use_mixed_precision_a
 
         # A matrix: diagonal, complex, in log-polar form
-        # log_magnitude and angle are learnable
-        # SEOP Fix 47: First-principles optimal memory horizon
-        #
-        # DERIVATION: For sequence length S, optimal memory window τ = S/e ≈ S/2.718
-        # This balances recency bias with long-range dependence (max mutual information).
-        #
-        # For S=256: τ_opt = 256/e ≈ 94 tokens
-        # |A| = exp(-1/τ) = exp(-1/94) = 0.9894
-        # -softplus(x) = log(|A|) = -0.0106
-        # softplus(x) = 0.0106 → x = log(exp(0.0106)-1) ≈ -4.55
-        #
-        # Initialize with small variance around optimal:
+        # Compute log_A_mag init from memory horizon τ:
+        #   |A| = exp(-1/τ), softplus(x) = 1/τ, x = log(exp(1/τ) - 1)
+        # Default (ratio=0): τ = S/e (heuristic, NOT derived — see Issue #2)
+        if memory_horizon_ratio > 0:
+            tau = memory_horizon_ratio * max_seq_length
+        else:
+            tau = max_seq_length / math.e
+        inv_tau = 1.0 / max(tau, 1.0)
+        log_a_init = math.log(math.exp(inv_tau) - 1.0) if inv_tau < 10.0 else inv_tau
         self.log_A_mag = nn.Parameter(
-            torch.rand(mimo_groups, state_dim) * 0.1 - 4.55  # softplus(-4.55..-4.45) ≈ 0.0106
+            torch.rand(mimo_groups, state_dim) * 0.1 - log_a_init
         )
         # SEOP: Small random init for rotational diversity.
         # Zero phase collapses all state dims to pure-real at init, preventing
@@ -93,7 +94,8 @@ class ComplexSSMState(nn.Module):
         # Small noise (σ=0.1) gives initial phase diversity while keeping
         # A^n interference manageable (constructive within ~10 steps).
         self.A_phase = nn.Parameter(
-            torch.randn(mimo_groups, state_dim) * 0.1  # SEOP: initial rotational diversity
+            torch.randn(mimo_groups, state_dim)
+            * 0.1  # SEOP: initial rotational diversity
         )
 
         # B projection: input -> state (complex linear, fused)
@@ -180,9 +182,12 @@ class ComplexSSMState(nn.Module):
         # - "auto" strategy: balances cache efficiency with parallelism overhead
         # - Provides ~2-3x speedup on high-end GPUs by fitting working set in L2
         all_h_r_flat, all_h_i_flat = complex_parallel_scan_chunked(
-            A_r_flat, A_i_flat, X_r_flat, X_i_flat,
+            A_r_flat,
+            A_i_flat,
+            X_r_flat,
+            X_i_flat,
             chunk_size=None,  # Auto-compute based on hardware
-            chunk_strategy="auto"
+            chunk_strategy="auto",
         )
 
         # Reshape back to [B, S, G, N]
@@ -217,6 +222,8 @@ class ComplexMamba3Layer(nn.Module):
         d_conv: int = 4,
         num_layers: int = 1,
         use_mixed_precision_a: bool = True,
+        memory_horizon_ratio: float = 0.0,
+        max_seq_length: int = 256,
     ):
         """
         Args:
@@ -227,6 +234,8 @@ class ComplexMamba3Layer(nn.Module):
             d_conv: Kernel size for depthwise convolution
             num_layers: Total number of layers (for residual scaling)
             use_mixed_precision_a: Use bfloat16 for A tensor in pscan (default True)
+            memory_horizon_ratio: τ/S ratio for SSM memory horizon init
+            max_seq_length: Sequence length for memory horizon computation
         """
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -271,12 +280,13 @@ class ComplexMamba3Layer(nn.Module):
         if self.conv.bias is not None:
             nn.init.zeros_(self.conv.bias)
 
-        # Complex SSM with optional mixed precision for A tensor
         self.ssm = ComplexSSMState(
             d_input=self.group_dim,
             state_dim=state_dim,
             mimo_groups=mimo_groups,
             use_mixed_precision_a=use_mixed_precision_a,
+            memory_horizon_ratio=memory_horizon_ratio,
+            max_seq_length=max_seq_length,
         )
 
         # Output projection (complex, fused)
@@ -286,7 +296,9 @@ class ComplexMamba3Layer(nn.Module):
         # For complex Gaussian z, |z|² ~ Exponential(1/2σ²). Using CDF gate
         # 1-exp(-|z|²·β) instead of sigmoid gives uniformly distributed gate values,
         # maximizing gradient information. Initialize β=exp(0)=1 for unit-variance match.
-        self.activation_threshold = nn.Parameter(torch.tensor(0.0))  # Reverted: sparse gate is a feature, not a bug
+        self.activation_threshold = nn.Parameter(
+            torch.tensor(0.0)
+        )  # Reverted: sparse gate is a feature, not a bug
 
         # SEOP Fix 17+52: Per-dimension SSM output scaling
         # Init to 1.0 (not 2.5) — with scaled embedding init (Fix 52), the SSM output
@@ -298,9 +310,7 @@ class ComplexMamba3Layer(nn.Module):
         # Without scaling, variance grows as 1 + L·σ² across L layers.
         # DeepSeek/GPT-2 uses 1/√(2L) for transformer (2 branches: attn+FFN).
         # Mamba has 1 branch per layer, so correct scaling is 1/√L.
-        self.residual_scale = nn.Parameter(
-            torch.tensor(1.0 / math.sqrt(num_layers))
-        )
+        self.residual_scale = nn.Parameter(torch.tensor(1.0 / math.sqrt(num_layers)))
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of Complex Mamba-3 layer.

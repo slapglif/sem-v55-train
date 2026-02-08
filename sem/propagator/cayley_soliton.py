@@ -52,12 +52,25 @@ class CayleySolitonPropagator(nn.Module):
         lazy_cg_tol: float = 1e-6,
         direct_solve: bool = False,
         pit_gamma: float = 1.0,
+        adaptive_cg_tol: bool = False,
+        cg_tol_warmup: float = 1e-4,
+        cg_tol_mid: float = 1e-5,
+        cg_tol_late: float = 1e-6,
+        cg_tol_warmup_end: int = 2000,
+        cg_tol_mid_end: int = 50000,
     ):
         super().__init__()
         self.dim = dim
         self.dt = dt
         self.cg_max_iter = cg_max_iter
         self.cg_tol = cg_tol
+        self.adaptive_cg_tol = adaptive_cg_tol
+        self._cg_tol_schedule = (
+            (cg_tol_warmup_end, cg_tol_warmup),
+            (cg_tol_mid_end, cg_tol_mid),
+            (float("inf"), cg_tol_late),
+        )
+        self._training_step: int = 0
         self.check_unitarity_flag = check_unitarity_flag
         # Warm-start cache for faster CG convergence
         self._psi_cache = None
@@ -82,6 +95,18 @@ class CayleySolitonPropagator(nn.Module):
         self.hamiltonian = MultiScaleHamiltonian(
             dim, num_scales=num_scales, base_sparsity=laplacian_sparsity
         )
+
+    def get_effective_cg_tol(self) -> float:
+        """Return CG tolerance for the current training step."""
+        if not self.adaptive_cg_tol:
+            return self.cg_tol
+        for step_boundary, tol in self._cg_tol_schedule:
+            if self._training_step < step_boundary:
+                return tol
+        return self.cg_tol
+
+    def set_training_step(self, step: int) -> None:
+        self._training_step = step
 
     def forward(self, psi: Tensor) -> Tensor:
         """Propagate wavefunction through one Cayley-Soliton step.
@@ -246,11 +271,12 @@ class CayleySolitonPropagator(nn.Module):
             else:
                 if _t:
                     t_cg = time.perf_counter()
+                effective_tol = self.get_effective_cg_tol()
                 psi_out_real_block = cg_solve_sparse(
                     a_minus_matvec_wrapped,
                     rhs_real_block,
                     self.cg_max_iter,
-                    self.cg_tol,
+                    effective_tol,
                     precond=block_jacobi_precond,
                     x0=x0,
                 )
@@ -310,6 +336,12 @@ class CayleySolitonStack(nn.Module):
         lazy_cg_tol: float = 1e-6,
         direct_solve: bool = False,
         pit_gamma: float = 1.0,
+        adaptive_cg_tol: bool = False,
+        cg_tol_warmup: float = 1e-4,
+        cg_tol_mid: float = 1e-5,
+        cg_tol_late: float = 1e-6,
+        cg_tol_warmup_end: int = 2000,
+        cg_tol_mid_end: int = 50000,
     ):
         super().__init__()
         self.layers = nn.ModuleList(
@@ -325,10 +357,20 @@ class CayleySolitonStack(nn.Module):
                     lazy_cg_tol=lazy_cg_tol,
                     direct_solve=direct_solve,
                     pit_gamma=pit_gamma,
+                    adaptive_cg_tol=adaptive_cg_tol,
+                    cg_tol_warmup=cg_tol_warmup,
+                    cg_tol_mid=cg_tol_mid,
+                    cg_tol_late=cg_tol_late,
+                    cg_tol_warmup_end=cg_tol_warmup_end,
+                    cg_tol_mid_end=cg_tol_mid_end,
                 )
                 for _ in range(num_layers)
             ]
         )
+
+    def set_training_step(self, step: int) -> None:
+        for layer in self.layers:
+            cast(CayleySolitonPropagator, layer).set_training_step(step)
 
     def set_timing(self, enabled: bool) -> None:
         for layer in self.layers:

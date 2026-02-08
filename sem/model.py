@@ -45,6 +45,8 @@ class SEMModel(nn.Module):
             sinkhorn_epsilon=c.encoder.sinkhorn_epsilon,
             sinkhorn_max_iter=c.encoder.sinkhorn_max_iter,
             sinkhorn_tol=c.encoder.sinkhorn_tol,
+            sinkhorn_auto_epsilon=c.encoder.sinkhorn_auto_epsilon,
+            sinkhorn_auto_epsilon_scale=c.encoder.sinkhorn_auto_epsilon_scale,
             max_seq_length=c.model.max_seq_length,
             low_vram_mode=c.training.low_vram_mode,
             soft_sparse=c.encoder.soft_sparse,
@@ -62,6 +64,8 @@ class SEMModel(nn.Module):
                     block_size=c.spinor.block_size,
                     d_conv=c.spinor.d_conv,
                     num_layers=c.model.num_layers,
+                    memory_horizon_ratio=c.spinor.memory_horizon_ratio,
+                    max_seq_length=c.model.max_seq_length,
                 )
                 for _ in range(c.model.num_layers)
             ]
@@ -80,6 +84,12 @@ class SEMModel(nn.Module):
             lazy_cg_tol=c.propagator.lazy_cg_tol,
             direct_solve=c.propagator.direct_solve,
             pit_gamma=c.propagator.pit_gamma,
+            adaptive_cg_tol=c.propagator.adaptive_cg_tol,
+            cg_tol_warmup=c.propagator.cg_tol_warmup,
+            cg_tol_mid=c.propagator.cg_tol_mid,
+            cg_tol_late=c.propagator.cg_tol_late,
+            cg_tol_warmup_end=c.propagator.cg_tol_warmup_end,
+            cg_tol_mid_end=c.propagator.cg_tol_mid_end,
         )
 
         # 4. Final normalization before collapse
