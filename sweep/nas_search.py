@@ -106,6 +106,10 @@ def make_config(trial: optuna.Trial) -> SEMConfig:
     temperature = _round_sig(trial.suggest_float("temperature", 0.5, 2.0))
     top_k = trial.suggest_int("top_k", 10, 100, step=10)
     top_p = _round_sig(trial.suggest_float("top_p", 0.8, 1.0))
+    min_p = _round_sig(trial.suggest_float("min_p", 0.0, 0.2))
+    typical_p = _round_sig(trial.suggest_float("typical_p", 0.8, 1.0))
+    repetition_penalty = _round_sig(trial.suggest_float("repetition_penalty", 1.0, 1.5))
+    temperature_last = trial.suggest_categorical("temperature_last", [True, False])
 
     # Training
     learning_rate = _round_sig(
@@ -200,7 +204,15 @@ def make_config(trial: optuna.Trial) -> SEMConfig:
             use_chebyshev_kpm=use_chebyshev_kpm,
             chebyshev_degree=chebyshev_degree,
         ),
-        sampler=SamplerConfig(temperature=temperature, top_k=top_k, top_p=top_p),
+        sampler=SamplerConfig(
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            typical_p=typical_p,
+            repetition_penalty=repetition_penalty,
+            temperature_last=temperature_last,
+        ),
         training=TrainingConfig(
             learning_rate=learning_rate,
             weight_decay=weight_decay,
@@ -414,7 +426,15 @@ def main():
     print(f"    direct_solve: {direct_solve}")
 
     print(f"\n  Sampler:")
-    for k in ["temperature", "top_k", "top_p"]:
+    for k in [
+        "temperature",
+        "top_k",
+        "top_p",
+        "min_p",
+        "typical_p",
+        "repetition_penalty",
+        "temperature_last",
+    ]:
         print(f"    {k}: {best.params.get(k, '?')}")
 
     print(f"\n  V8:")
