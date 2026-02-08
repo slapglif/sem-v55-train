@@ -70,7 +70,7 @@ class TestSinkhorn:
         torch.manual_seed(42)
         logits = torch.randn(8, 4, 4)  # [B, N, N]
 
-        H = sinkhorn_log(logits, num_iters=20, tau=0.05)
+        H = sinkhorn_log(logits, num_iters=200, tau=0.05)
 
         assert H.shape == (8, 4, 4)
 

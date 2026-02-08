@@ -81,7 +81,7 @@ def sinkhorn_log(
     # Preserve the original contract: run *at least* num_iters. In practice for
     # sharp (low-tau) projections, small matrices can still need >50 iterations
     # to hit ~1e-3 marginal error across a batch, so we default to the full cap.
-    total_iters = min(max(num_iters, max_iters), max_iters)
+    total_iters = min(num_iters, max_iters)
 
     for _ in range(total_iters):
         u = -torch.logsumexp(Z + v.unsqueeze(-2), dim=-1)
@@ -180,15 +180,17 @@ def sinkhorn_log_complex(
     # Project magnitude onto Birkhoff Polytope
     H_mag = sinkhorn_log(logits_mag, num_iters=num_iters, tau=tau, eps=eps)
 
-    # Preserve phase, scale by doubly stochastic magnitude.
-    # CRITICAL: atan2(0, eps) has gradient d/dy = eps/(eps² + 0²) = 1/eps ≈ 1e12
-    # at the origin, causing catastrophic gradient explosion. We mask phase to
-    # zero where magnitude is negligible (phase is meaningless there anyway).
-    phase = torch.atan2(logits_imag, logits_real)
+    # Direct normalization instead of atan2 → cos/sin roundtrip.
+    # atan2(0,0) backward computes 0/0 = NaN; torch.where can't mask it
+    # because 0 * NaN = NaN in IEEE 754.
+    safe_mag = logits_mag.clamp(min=1e-6)
+    unit_real = logits_real / safe_mag
+    unit_imag = logits_imag / safe_mag
     mag_is_small = logits_mag.detach() < 1e-4
-    phase = torch.where(mag_is_small, torch.zeros_like(phase), phase)
+    unit_real = torch.where(mag_is_small, torch.ones_like(unit_real), unit_real)
+    unit_imag = torch.where(mag_is_small, torch.zeros_like(unit_imag), unit_imag)
 
-    H_real = H_mag * torch.cos(phase)
-    H_imag = H_mag * torch.sin(phase)
+    H_real = H_mag * unit_real
+    H_imag = H_mag * unit_imag
 
     return H_real, H_imag
