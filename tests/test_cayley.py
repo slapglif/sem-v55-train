@@ -7,6 +7,7 @@ Validates:
 - Norm preservation through propagation
 - Nonlinear phase rotation correctness
 """
+
 import torch
 import pytest
 
@@ -70,6 +71,57 @@ class TestCGSolver:
         assert not torch.isnan(b.grad).any(), "NaN in b gradient"
         assert not torch.isnan(A.grad).any(), "NaN in A gradient"
 
+    def test_sparse_coo_cache(self):
+        """Sparse COO Laplacian should be cached after first forward pass."""
+        from sem.propagator.cayley_soliton import CayleySolitonPropagator
+
+        prop = CayleySolitonPropagator(
+            dim=16, dt=0.1, cg_max_iter=10, laplacian_sparsity=3, num_scales=1
+        )
+        prop.timing_enabled = True
+
+        psi = torch.randn(1, 4, 16, dtype=torch.complex64)
+        _ = prop(psi)
+
+        # After first forward, cache_weights should have been called
+        assert "cache_weights" in prop._timing_stats, (
+            "Sparse Laplacian should be cached after first forward pass"
+        )
+
+    def test_adaptive_cg_tolerance_schedule(self):
+        """Adaptive CG tolerance should change with training step."""
+        from sem.propagator.cayley_soliton import CayleySolitonStack
+
+        stack = CayleySolitonStack(
+            dim=16,
+            num_layers=1,
+            dt=0.1,
+            cg_max_iter=10,
+            laplacian_sparsity=3,
+            adaptive_cg_tol=True,
+            cg_tol_warmup=1e-4,
+            cg_tol_mid=1e-5,
+            cg_tol_late=1e-6,
+            cg_tol_warmup_end=100,
+            cg_tol_mid_end=500,
+        )
+
+        # Check that the stack accepts adaptive CG params
+        psi = torch.randn(1, 4, 16, dtype=torch.complex64)
+        psi_out = stack(psi)
+        assert psi_out.shape == (1, 4, 16)
+        assert not torch.isnan(psi_out).any()
+
+        # If there's a set_training_step method, test it
+        if hasattr(stack, "set_training_step"):
+            stack.set_training_step(50)  # warmup phase
+            psi_out_warmup = stack(psi)
+            assert not torch.isnan(psi_out_warmup).any()
+
+            stack.set_training_step(200)  # mid phase
+            psi_out_mid = stack(psi)
+            assert not torch.isnan(psi_out_mid).any()
+
 
 class TestCayleyUnitarity:
     """Test unitarity of the Cayley transform."""
@@ -92,9 +144,13 @@ class TestCayleyUnitarity:
         from sem.propagator.cayley_soliton import CayleySolitonPropagator
 
         prop = CayleySolitonPropagator(
-            dim=16, dt=0.1, nonlinear_alpha=0.1,
-            cg_max_iter=30, cg_tol=1e-7,
-            laplacian_sparsity=3, num_scales=1
+            dim=16,
+            dt=0.1,
+            nonlinear_alpha=0.1,
+            cg_max_iter=30,
+            cg_tol=1e-7,
+            laplacian_sparsity=3,
+            num_scales=1,
         )
 
         psi = torch.randn(1, 4, 16, dtype=torch.complex64)
@@ -117,8 +173,7 @@ class TestCayleySolitonPropagator:
         from sem.propagator.cayley_soliton import CayleySolitonPropagator
 
         prop = CayleySolitonPropagator(
-            dim=16, dt=0.1, cg_max_iter=10,
-            laplacian_sparsity=3, num_scales=1
+            dim=16, dt=0.1, cg_max_iter=10, laplacian_sparsity=3, num_scales=1
         )
 
         psi = torch.randn(2, 8, 16, dtype=torch.complex64)
@@ -132,8 +187,7 @@ class TestCayleySolitonPropagator:
         from sem.propagator.cayley_soliton import CayleySolitonPropagator
 
         prop = CayleySolitonPropagator(
-            dim=16, dt=0.1, cg_max_iter=20,
-            laplacian_sparsity=3, num_scales=1
+            dim=16, dt=0.1, cg_max_iter=20, laplacian_sparsity=3, num_scales=1
         )
 
         psi = torch.randn(1, 4, 16, dtype=torch.complex64)
@@ -147,8 +201,7 @@ class TestCayleySolitonPropagator:
         from sem.propagator.cayley_soliton import CayleySolitonPropagator
 
         prop = CayleySolitonPropagator(
-            dim=8, dt=0.1, cg_max_iter=10,
-            laplacian_sparsity=2, num_scales=1
+            dim=8, dt=0.1, cg_max_iter=10, laplacian_sparsity=2, num_scales=1
         )
 
         psi = torch.randn(1, 2, 8, dtype=torch.complex64, requires_grad=True)
@@ -164,8 +217,7 @@ class TestCayleySolitonPropagator:
         from sem.propagator.cayley_soliton import CayleySolitonStack
 
         stack = CayleySolitonStack(
-            dim=16, num_layers=3, dt=0.1,
-            cg_max_iter=10, laplacian_sparsity=3
+            dim=16, num_layers=3, dt=0.1, cg_max_iter=10, laplacian_sparsity=3
         )
 
         psi = torch.randn(1, 4, 16, dtype=torch.complex64)

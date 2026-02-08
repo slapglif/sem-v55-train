@@ -7,6 +7,7 @@ Validates:
 - MESH encoder end-to-end shape correctness
 - Sparsity of output representation
 """
+
 import torch
 import pytest
 import math
@@ -44,10 +45,12 @@ class TestLogSinkhorn:
         expected_row = torch.ones(B, N) / N
         expected_col = torch.ones(B, M) / M
 
-        assert (row_sums - expected_row).abs().max() < 0.1, \
+        assert (row_sums - expected_row).abs().max() < 0.1, (
             f"Row marginals deviate: {(row_sums - expected_row).abs().max():.4f}"
-        assert (col_sums - expected_col).abs().max() < 0.1, \
+        )
+        assert (col_sums - expected_col).abs().max() < 0.1, (
             f"Col marginals deviate: {(col_sums - expected_col).abs().max():.4f}"
+        )
 
     def test_differentiability(self):
         """Sinkhorn output should be differentiable w.r.t. cost."""
@@ -76,8 +79,30 @@ class TestLogSinkhorn:
         entropy_low = -(T_low * (T_low + 1e-12).log()).sum()
         entropy_high = -(T_high * (T_high + 1e-12).log()).sum()
 
-        assert entropy_low < entropy_high, \
+        assert entropy_low < entropy_high, (
             "Lower epsilon should produce lower entropy transport plan"
+        )
+
+    def test_auto_epsilon(self):
+        """Auto epsilon should scale with cost distribution."""
+        from sem.encoder.mesh_sdr import MESHEncoder
+
+        encoder = MESHEncoder(
+            vocab_size=100,
+            hidden_dim=32,
+            sdr_sparsity=8,
+            sdr_candidates=16,
+            max_seq_length=64,
+            sinkhorn_auto_epsilon=True,
+            sinkhorn_auto_epsilon_scale=0.1,
+        )
+
+        tokens = torch.randint(0, 100, (1, 8))
+        z = encoder(tokens)
+
+        assert z.shape == (1, 8, 32)
+        assert z.is_complex()
+        assert not torch.isnan(z).any(), "NaN with auto_epsilon"
 
 
 class TestMESHEncoder:
@@ -88,9 +113,11 @@ class TestMESHEncoder:
         from sem.encoder.mesh_sdr import MESHEncoder
 
         encoder = MESHEncoder(
-            vocab_size=100, hidden_dim=32,
-            sdr_sparsity=8, sdr_candidates=16,
-            max_seq_length=64
+            vocab_size=100,
+            hidden_dim=32,
+            sdr_sparsity=8,
+            sdr_candidates=16,
+            max_seq_length=64,
         )
 
         tokens = torch.randint(0, 100, (2, 16))
@@ -104,9 +131,11 @@ class TestMESHEncoder:
         from sem.encoder.mesh_sdr import MESHEncoder
 
         encoder = MESHEncoder(
-            vocab_size=100, hidden_dim=64,
-            sdr_sparsity=8, sdr_candidates=32,
-            max_seq_length=64
+            vocab_size=100,
+            hidden_dim=64,
+            sdr_sparsity=8,
+            sdr_candidates=32,
+            max_seq_length=64,
         )
 
         tokens = torch.randint(0, 100, (1, 8))
@@ -125,9 +154,11 @@ class TestMESHEncoder:
         from sem.encoder.mesh_sdr import MESHEncoder
 
         encoder = MESHEncoder(
-            vocab_size=100, hidden_dim=32,
-            sdr_sparsity=4, sdr_candidates=16,
-            max_seq_length=32
+            vocab_size=100,
+            hidden_dim=32,
+            sdr_sparsity=4,
+            sdr_candidates=16,
+            max_seq_length=32,
         )
 
         tokens = torch.randint(0, 100, (1, 8))

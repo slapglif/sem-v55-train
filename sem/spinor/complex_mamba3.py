@@ -70,6 +70,14 @@ class ComplexSSMState(nn.Module):
             max_seq_length: Used with memory_horizon_ratio to compute init.
         """
         super().__init__()
+
+        # Input validation
+        if memory_horizon_ratio < 0.0 or memory_horizon_ratio > 1.0:
+            raise ValueError(
+                f"memory_horizon_ratio must be in [0, 1], got {memory_horizon_ratio}"
+            )
+        if max_seq_length <= 0:
+            raise ValueError(f"max_seq_length must be positive, got {max_seq_length}")
         self.d_input = d_input
         self.state_dim = state_dim
         self.mimo_groups = mimo_groups
@@ -78,7 +86,8 @@ class ComplexSSMState(nn.Module):
         # A matrix: diagonal, complex, in log-polar form
         # Compute log_A_mag init from memory horizon τ:
         #   |A| = exp(-1/τ), softplus(x) = 1/τ, x = log(exp(1/τ) - 1)
-        # Default (ratio=0): τ = S/e (heuristic, NOT derived — see Issue #2)
+        # Default (ratio=0): τ* = S/e maximizes entropic effective span of
+        #   untruncated memory kernel (THEOREMS.md §1.2). Gives ~77.1% context coverage.
         if memory_horizon_ratio > 0:
             tau = memory_horizon_ratio * max_seq_length
         else:

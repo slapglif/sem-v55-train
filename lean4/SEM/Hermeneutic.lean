@@ -36,10 +36,11 @@ def is_meaningful {n : Nat} (v : WaveFunction n) (G : GlobalState n)
   -- Fixed point condition: rotation by context is identity
   ∀ (i : Fin n), rotated.components i = v.components i
 
-/-- The Crystal Manifold is the set of all meaningful representations -/
+/-- The Crystal Manifold is the set of all meaningful representations.
+    Represented as a predicate (membership test) rather than using Mathlib's Set. -/
 def CrystalManifold {n : Nat} (extract : ContextExtractor n)
-    (rotate : Rotator n) : Set (WaveFunction n) :=
-  { v | ∃ G : GlobalState n, is_meaningful v G extract rotate }
+    (rotate : Rotator n) (v : WaveFunction n) : Prop :=
+  ∃ G : GlobalState n, is_meaningful v G extract rotate
 
 /-- A rotation is contractive if it brings points closer to fixed points.
     This is needed for the Banach fixed point theorem to guarantee
@@ -89,7 +90,7 @@ theorem crystal_manifold_nonempty {n : Nat}
     (extract : ContextExtractor n) (rotate : Rotator n)
     (G : GlobalState n) (κ : Float)
     (hContractive : is_contractive rotate (extract G) κ) :
-    ∃ v, v ∈ CrystalManifold extract rotate := by
+    ∃ v, CrystalManifold extract rotate v := by
   -- The fixed point exists by Banach theorem
   obtain ⟨v, hv⟩ := fixed_point_existence rotate (extract G) κ hContractive
   exact ⟨v, G, hv⟩

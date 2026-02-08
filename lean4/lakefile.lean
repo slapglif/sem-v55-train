@@ -8,4 +8,4 @@ package sem where
 
 @[default_target]
 lean_lib SEM where
-  srcDir := "SEM"
+  roots := #[`SEM]

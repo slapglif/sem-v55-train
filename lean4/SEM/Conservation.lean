@@ -22,10 +22,9 @@ def Propagator (n : Nat) := WaveFunction n → Time → WaveFunction n
 def conserves_information {n : Nat} (P : Propagator n) : Prop :=
   ∀ (ψ : WaveFunction n) (t : Time), normSq (P ψ t) = normSq ψ
 
-/-- The Cayley propagator is defined as the composition of:
-    1. Nonlinear phase rotation (preserves magnitudes, hence norm)
-    2. Cayley diffusion (unitary, hence preserves norm)
--/
+-- The Cayley propagator is defined as the composition of:
+--   1. Nonlinear phase rotation (preserves magnitudes, hence norm)
+--   2. Cayley diffusion (unitary, hence preserves norm)
 
 /-- Phase rotation preserves norm because |e^{iθ}z| = |z| -/
 axiom phase_rotation_preserves_norm {n : Nat} (ψ : WaveFunction n)

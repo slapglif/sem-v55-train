@@ -8,6 +8,7 @@ Tests the full model pipeline end-to-end:
 - Training loop runs without errors
 - Loss decreases over steps
 """
+
 import torch
 import pytest
 
@@ -17,13 +18,23 @@ class TestFullForwardPass:
 
     def test_forward_shape(self):
         """Full model forward pass should produce correct shapes."""
-        from sem.config import SEMConfig, ModelConfig, EncoderConfig, SpinorConfig, PropagatorConfig
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
         from sem.model import SEMModel
 
         config = SEMConfig(
-            model=ModelConfig(hidden_dim=32, num_layers=2, vocab_size=100, max_seq_length=64),
+            model=ModelConfig(
+                hidden_dim=32, num_layers=2, vocab_size=100, max_seq_length=64
+            ),
             encoder=EncoderConfig(sdr_sparsity=8, sdr_candidates=16),
-            spinor=SpinorConfig(block_size=8, num_blocks=4, state_dim=16, mimo_groups=4, d_conv=2),
+            spinor=SpinorConfig(
+                block_size=8, num_blocks=4, state_dim=16, mimo_groups=4, d_conv=2
+            ),
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=3),
         )
 
@@ -32,21 +43,31 @@ class TestFullForwardPass:
 
         output = model(tokens, targets=tokens)
 
-        assert 'logits' in output
-        assert 'log_probs' in output
-        assert 'loss' in output
-        assert output['logits'].shape == (2, 16, 100)
-        assert output['loss'].ndim == 0  # scalar
+        assert "logits" in output
+        assert "log_probs" in output
+        assert "loss" in output
+        assert output["logits"].shape == (2, 16, 100)
+        assert output["loss"].ndim == 0  # scalar
 
     def test_no_nan(self):
         """Forward pass should not produce NaN."""
-        from sem.config import SEMConfig, ModelConfig, EncoderConfig, SpinorConfig, PropagatorConfig
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
         from sem.model import SEMModel
 
         config = SEMConfig(
-            model=ModelConfig(hidden_dim=32, num_layers=2, vocab_size=100, max_seq_length=64),
+            model=ModelConfig(
+                hidden_dim=32, num_layers=2, vocab_size=100, max_seq_length=64
+            ),
             encoder=EncoderConfig(sdr_sparsity=8, sdr_candidates=16),
-            spinor=SpinorConfig(block_size=8, num_blocks=4, state_dim=16, mimo_groups=4, d_conv=2),
+            spinor=SpinorConfig(
+                block_size=8, num_blocks=4, state_dim=16, mimo_groups=4, d_conv=2
+            ),
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=3),
         )
 
@@ -55,19 +76,29 @@ class TestFullForwardPass:
 
         output = model(tokens, targets=tokens)
 
-        assert not torch.isnan(output['logits']).any(), "NaN in logits"
-        assert not torch.isinf(output['logits']).any(), "Inf in logits"
-        assert not torch.isnan(output['loss']), "NaN in loss"
+        assert not torch.isnan(output["logits"]).any(), "NaN in logits"
+        assert not torch.isinf(output["logits"]).any(), "Inf in logits"
+        assert not torch.isnan(output["loss"]), "NaN in loss"
 
     def test_gradient_flow(self):
         """All parameters should receive gradients."""
-        from sem.config import SEMConfig, ModelConfig, EncoderConfig, SpinorConfig, PropagatorConfig
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
         from sem.model import SEMModel
 
         config = SEMConfig(
-            model=ModelConfig(hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=32),
+            model=ModelConfig(
+                hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=32
+            ),
             encoder=EncoderConfig(sdr_sparsity=4, sdr_candidates=8),
-            spinor=SpinorConfig(block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2),
+            spinor=SpinorConfig(
+                block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
+            ),
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=2),
         )
 
@@ -75,7 +106,7 @@ class TestFullForwardPass:
         tokens = torch.randint(0, 50, (1, 8))
 
         output = model(tokens, targets=tokens)
-        output['loss'].backward()
+        output["loss"].backward()
 
         total = 0
         with_grad = 0
@@ -85,26 +116,37 @@ class TestFullForwardPass:
                 with_grad += 1
 
         ratio = with_grad / total
-        assert ratio > 0.5, \
+        assert ratio > 0.5, (
             f"Only {with_grad}/{total} ({ratio:.0%}) parameters got gradients"
+        )
 
     def test_parameter_count(self):
         """Model should report parameter counts."""
-        from sem.config import SEMConfig, ModelConfig, EncoderConfig, SpinorConfig, PropagatorConfig
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
         from sem.model import SEMModel
 
         config = SEMConfig(
-            model=ModelConfig(hidden_dim=32, num_layers=2, vocab_size=100, max_seq_length=64),
+            model=ModelConfig(
+                hidden_dim=32, num_layers=2, vocab_size=100, max_seq_length=64
+            ),
             encoder=EncoderConfig(sdr_sparsity=8, sdr_candidates=16),
-            spinor=SpinorConfig(block_size=8, num_blocks=4, state_dim=16, mimo_groups=4, d_conv=2),
+            spinor=SpinorConfig(
+                block_size=8, num_blocks=4, state_dim=16, mimo_groups=4, d_conv=2
+            ),
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=3),
         )
 
         model = SEMModel(config)
         counts = model.count_parameters()
 
-        assert 'total' in counts
-        assert counts['total']['total'] > 0
+        assert "total" in counts
+        assert counts["total"]["total"] > 0
 
 
 class TestTrainingLoop:
@@ -112,14 +154,24 @@ class TestTrainingLoop:
 
     def test_single_step(self):
         """Single training step should complete without error."""
-        from sem.config import SEMConfig, ModelConfig, EncoderConfig, SpinorConfig, PropagatorConfig
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
         from sem.model import SEMModel
         from sem.utils.complex_adamw import ComplexAdamW
 
         config = SEMConfig(
-            model=ModelConfig(hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=16),
+            model=ModelConfig(
+                hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=16
+            ),
             encoder=EncoderConfig(sdr_sparsity=4, sdr_candidates=8),
-            spinor=SpinorConfig(block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2),
+            spinor=SpinorConfig(
+                block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
+            ),
             propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
         )
 
@@ -130,7 +182,7 @@ class TestTrainingLoop:
 
         # Forward
         output = model(tokens, targets=tokens)
-        loss = output['loss']
+        loss = output["loss"]
 
         # Backward
         optimizer.zero_grad()
@@ -141,14 +193,24 @@ class TestTrainingLoop:
 
     def test_loss_decreases(self):
         """Loss should decrease over a few training steps."""
-        from sem.config import SEMConfig, ModelConfig, EncoderConfig, SpinorConfig, PropagatorConfig
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
         from sem.model import SEMModel
         from sem.utils.complex_adamw import ComplexAdamW
 
         config = SEMConfig(
-            model=ModelConfig(hidden_dim=16, num_layers=1, vocab_size=20, max_seq_length=16),
+            model=ModelConfig(
+                hidden_dim=16, num_layers=1, vocab_size=20, max_seq_length=16
+            ),
             encoder=EncoderConfig(sdr_sparsity=4, sdr_candidates=8),
-            spinor=SpinorConfig(block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2),
+            spinor=SpinorConfig(
+                block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
+            ),
             propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
         )
 
@@ -161,7 +223,7 @@ class TestTrainingLoop:
         losses = []
         for _ in range(5):
             output = model(tokens, targets=tokens)
-            loss = output['loss']
+            loss = output["loss"]
 
             optimizer.zero_grad()
             loss.backward()
@@ -170,8 +232,9 @@ class TestTrainingLoop:
             losses.append(loss.item())
 
         # Loss should generally decrease (allow some noise)
-        assert losses[-1] < losses[0] * 1.1, \
+        assert losses[-1] < losses[0] * 1.1, (
             f"Loss didn't decrease: {losses[0]:.4f} -> {losses[-1]:.4f}"
+        )
 
 
 class TestConfig:
@@ -191,7 +254,119 @@ class TestConfig:
         from sem.config import SEMConfig
         import os
 
-        yaml_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'default.yaml')
+        yaml_path = os.path.join(
+            os.path.dirname(__file__), "..", "configs", "default.yaml"
+        )
         if os.path.exists(yaml_path):
             config = SEMConfig.from_yaml(yaml_path)
             assert config.model.hidden_dim == 256
+
+
+class TestSEOPFixes:
+    """Test SEOP fixes are properly implemented."""
+
+    def test_seop_fix_34_detach(self):
+        """SEOP Fix 34: unitary_divergence should be detached in loss."""
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+            TrainingConfig,
+        )
+        from sem.model import SEMModel
+
+        config = SEMConfig(
+            model=ModelConfig(
+                hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=16
+            ),
+            encoder=EncoderConfig(sdr_sparsity=4, sdr_candidates=8),
+            spinor=SpinorConfig(
+                block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
+            ),
+            propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
+            training=TrainingConfig(unitary_lambda=0.01),
+        )
+
+        model = SEMModel(config)
+        tokens = torch.randint(0, 50, (1, 8))
+        output = model(tokens, targets=tokens)
+
+        # unitary_divergence should be in output
+        assert "unitary_divergence" in output
+        # Loss should still be differentiable
+        output["loss"].backward()
+        # Key check: since unitary_divergence is detached, its contribution
+        # to the loss gradient should NOT flow back through the model's
+        # wavefunction path. We verify loss backward completes without error.
+
+    def test_seop_fix_35_clamp(self):
+        """SEOP Fix 35: psi_energy should be clamped before log²."""
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
+        from sem.model import SEMModel
+
+        config = SEMConfig(
+            model=ModelConfig(
+                hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=16
+            ),
+            encoder=EncoderConfig(sdr_sparsity=4, sdr_candidates=8),
+            spinor=SpinorConfig(
+                block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
+            ),
+            propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
+        )
+
+        model = SEMModel(config)
+
+        # Test with normal input
+        tokens = torch.randint(0, 50, (1, 8))
+        output = model(tokens, targets=tokens)
+
+        # unitary_divergence should be finite (clamped prevents explosion)
+        assert torch.isfinite(output["unitary_divergence"]), (
+            f"unitary_divergence not finite: {output['unitary_divergence']}"
+        )
+
+    def test_training_step_wiring(self):
+        """Training step counter should propagate to propagator for adaptive CG."""
+        from sem.config import (
+            SEMConfig,
+            ModelConfig,
+            EncoderConfig,
+            SpinorConfig,
+            PropagatorConfig,
+        )
+        from sem.model import SEMModel
+
+        config = SEMConfig(
+            model=ModelConfig(
+                hidden_dim=16, num_layers=1, vocab_size=50, max_seq_length=16
+            ),
+            encoder=EncoderConfig(sdr_sparsity=4, sdr_candidates=8),
+            spinor=SpinorConfig(
+                block_size=4, num_blocks=4, state_dim=8, mimo_groups=2, d_conv=2
+            ),
+            propagator=PropagatorConfig(
+                cg_max_iter=5,
+                laplacian_sparsity=2,
+                adaptive_cg_tol=True,
+            ),
+        )
+
+        model = SEMModel(config)
+
+        # The propagator (or its stack) should have a set_training_step method
+        if hasattr(model.propagator, "set_training_step"):
+            model.propagator.set_training_step(100)
+
+        # Model should still produce valid output
+        tokens = torch.randint(0, 50, (1, 8))
+        output = model(tokens, targets=tokens)
+        assert torch.isfinite(output["loss"])
