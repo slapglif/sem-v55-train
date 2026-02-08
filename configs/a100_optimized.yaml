@@ -12,7 +12,7 @@ encoder:
   sdr_sparsity: 16
   sdr_candidates: 128
   sinkhorn_epsilon: 0.07
-  sinkhorn_max_iter: 90
+  sinkhorn_max_iter: 15
   sinkhorn_tol: 1.0e-3
   sinkhorn_auto_epsilon: true
   sinkhorn_auto_epsilon_scale: 0.04
@@ -63,7 +63,7 @@ sampler:
 training:
   batch_size: 2048
   micro_batch_size: 32
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   dtype: float32
   learning_rate: 8.6e-4
   weight_decay: 0.002
@@ -77,14 +77,14 @@ training:
   label_smoothing: 0.058
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 4
+  num_workers: 8
   shuffle_buffer_size: 50000
   scheduler_type: "wsd"
   stable_steps: 0
   decay_steps: 10000
   lr_min_ratio: 0.1
   log_interval: 1
-  health_check_interval: 50
+  health_check_interval: 500
   checkpoint_interval: 200
   keep_checkpoints: 5
   wandb_project: "sem-v55-a100"
@@ -98,7 +98,7 @@ v8:
   use_quaternionic: true
   use_mhc: true
   mhc_streams: 8
-  mhc_num_iters: 10
+  mhc_num_iters: 3
   mhc_tau: 0.031
   lindblad_gamma: 0.007
   num_lindblad_ops: 4

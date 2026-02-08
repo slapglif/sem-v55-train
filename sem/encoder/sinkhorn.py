@@ -84,19 +84,16 @@ class LogSinkhorn(nn.Module):
         log_u = torch.zeros(B, N, device=device, dtype=dtype)  # [B, N]
         log_v = torch.zeros(B, M, device=device, dtype=dtype)  # [B, M]
 
+        # PERF: Run fixed iteration count — no early-exit convergence check.
+        # The old code called `(log_u - log_u_prev).abs().max()` which triggers
+        # an implicit .item() GPU-CPU sync every iteration (up to max_iter syncs
+        # per micro-batch). For 16 micro-batches that's 16*max_iter pipeline stalls.
         for iteration in range(self.max_iter):
-            log_u_prev = log_u.clone()
-
             # Update u: log_u = log_r - logsumexp(log_K + log_v[None,:], dim=-1)
             log_u = log_r - torch.logsumexp(log_K + log_v.unsqueeze(-2), dim=-1)
 
             # Update v: log_v = log_c - logsumexp(log_K + log_u[:, None], dim=-2)
             log_v = log_c - torch.logsumexp(log_K + log_u.unsqueeze(-1), dim=-2)
-
-            # Check convergence
-            change = (log_u - log_u_prev).abs().max()
-            if change < self.tol:
-                break
 
         # Recover transport plan: T = diag(u) @ K @ diag(v)
         # log T = log_u[:, :, None] + log_K + log_v[:, None, :]

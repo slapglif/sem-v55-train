@@ -14,6 +14,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import WandbLogger, CSVLogger
 from pytorch_lightning.profilers import SimpleProfiler
+from pytorch_lightning.strategies import DDPStrategy
 
 from sem.config import SEMConfig
 from sem.data.lightning_datamodule import SEMDataModule
@@ -242,14 +243,19 @@ def main():
 
     # --- Resolve devices / strategy / precision per accelerator ---
     if device_type == "xpu":
-        # XPU: single-device only, fp32, no DDP
         effective_devices = 1
-        effective_strategy = strategy  # SingleDeviceStrategy set above
+        effective_strategy = strategy
         effective_precision = None if plugins else "32-true"
     else:
-        # CUDA / CPU: honour CLI args
-        effective_devices = args.devices  # -1 = all GPUs
-        effective_strategy = strategy if strategy is not None else args.strategy
+        effective_devices = args.devices
+        if strategy is not None:
+            effective_strategy = strategy
+        elif args.strategy == "ddp_find_unused_parameters_true":
+            effective_strategy = DDPStrategy(
+                find_unused_parameters=True, static_graph=True
+            )
+        else:
+            effective_strategy = args.strategy
         effective_precision = args.precision if not plugins else None
 
     # Gradient accumulation: global_batch = micro_batch * devices * accum

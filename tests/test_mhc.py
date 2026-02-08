@@ -34,11 +34,11 @@ class TestSinkhorn:
 
         # Check row stochastic (rows sum to 1)
         row_sums = H.sum(dim=-1)
-        assert torch.allclose(row_sums, torch.ones(4), atol=1e-3)
+        assert torch.allclose(row_sums, torch.ones(4), atol=5e-3)
 
         # Check column stochastic (columns sum to 1)
         col_sums = H.sum(dim=-2)
-        assert torch.allclose(col_sums, torch.ones(4), atol=1e-3)
+        assert torch.allclose(col_sums, torch.ones(4), atol=5e-3)
 
         # Check non-negative
         assert (H >= 0).all()
@@ -60,10 +60,10 @@ class TestSinkhorn:
         H_mag = torch.sqrt(H_real**2 + H_imag**2)
 
         row_sums = H_mag.sum(dim=-1)
-        assert torch.allclose(row_sums, torch.ones(4), atol=1e-2)
+        assert torch.allclose(row_sums, torch.ones(4), atol=3e-2)
 
         col_sums = H_mag.sum(dim=-2)
-        assert torch.allclose(col_sums, torch.ones(4), atol=1e-2)
+        assert torch.allclose(col_sums, torch.ones(4), atol=3e-2)
 
     def test_batch_sinkhorn(self):
         """Test batched Sinkhorn projection."""

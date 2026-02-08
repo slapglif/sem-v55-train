@@ -18,6 +18,7 @@ class SEMConsoleLogger(Callback):
         super().__init__()
         self.log_interval = log_interval
         self.start_time = None
+        self._last_step_time = None
 
     def on_train_start(self, trainer, pl_module):
         self.start_time = time.perf_counter()
@@ -31,42 +32,56 @@ class SEMConsoleLogger(Callback):
         if start_time is None:
             return
 
-        if not isinstance(outputs, dict) or "loss" not in outputs:
-            return
-        outputs_dict = cast(Dict[str, Any], outputs)
-
         if hasattr(self, "_last_logged_step") and self._last_logged_step == step:
             return
         self._last_logged_step = step
 
-        loss_val = outputs_dict["loss"]
+        # Read loss from callback_metrics (real un-divided loss)
+        loss_metric = trainer.callback_metrics.get("train/loss")
+        if loss_metric is None:
+            return
         loss = (
-            loss_val.item() if isinstance(loss_val, torch.Tensor) else float(loss_val)
+            loss_metric.item()
+            if isinstance(loss_metric, torch.Tensor)
+            else float(loss_metric)
         )
+
         # Handle multiple optimizers if present, otherwise take first
         trainer_obj = cast(Any, trainer)
         opts = trainer_obj.optimizers
         lr = opts[0].param_groups[0]["lr"] if opts else 0.0
 
-        elapsed = time.perf_counter() - start_time
-        avg_step_time = elapsed / max(1, step)
+        # Per-step timing instead of running average
+        now = time.perf_counter()
+        if self._last_step_time is None:
+            step_time = now - start_time
+        else:
+            step_time = now - self._last_step_time
+        self._last_step_time = now
 
-        # Calculate tokens/sec
+        # Calculate tokens/sec with global batch accounting
         module = cast(Any, pl_module)
         config = getattr(module, "config", None)
         if config is None:
             return
-        batch_size = config.training.batch_size
+        micro_batch_size = config.training.micro_batch_size
         seq_len = 1024
         datamodule = getattr(trainer_obj, "datamodule", None)
         dataset = getattr(datamodule, "dataset", None)
         if dataset is not None and hasattr(dataset, "seq_len"):
             seq_len = dataset.seq_len
-        tok_per_sec = (batch_size * seq_len) / max(1e-6, avg_step_time)
+
+        # Global tokens = micro_batch_size * seq_len * num_devices * accumulate_grad_batches
+        num_devices = max(1, trainer_obj.num_devices)
+        accumulate_grad_batches = max(1, trainer_obj.accumulate_grad_batches)
+        global_tokens = (
+            micro_batch_size * seq_len * num_devices * accumulate_grad_batches
+        )
+        tok_per_sec = global_tokens / max(1e-6, step_time)
 
         logger.info(
             f"Step {step}: loss={loss:.4f} | lr={lr:.2e} | "
-            f"step_time={avg_step_time * 1000:.1f}ms | tok/s={tok_per_sec:.0f}"
+            f"step_time={step_time * 1000:.1f}ms | tok/s={tok_per_sec:.0f}"
         )
 
 

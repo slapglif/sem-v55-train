@@ -66,8 +66,6 @@ class SEMLightningModule(L.LightningModule):
 
             for m in self.model.mamba_layers:
                 make_checkpointed(m)
-            for m in self.model.propagator.layers:
-                make_checkpointed(m)
         else:
             logger.info(
                 "Gradient checkpointing DISABLED (config.training.gradient_checkpointing=False)"
@@ -85,12 +83,21 @@ class SEMLightningModule(L.LightningModule):
         return self.model(x, targets=targets, token_freqs=token_freqs)
 
     def training_step(self, batch, batch_idx):
-        # SEOP Fix 48: Propagator permanently disabled — CG solver non-convergence (residual 0.39 >> tol 2e-3)
-        # injects 14-19% norm corruption. Only 15.4K params (0.08% of model) — negligible capacity.
+        # Propagator warmup: smooth alpha ramp 0→1 over warmup_steps.
+        # Uses Chebyshev KPM (O(D)) instead of CG solver, avoiding prior convergence issues (SEOP Fix 48).
 
         # Wire adaptive CG tolerance schedule to propagator
         if hasattr(self.model, "propagator"):
             self.model.propagator.set_training_step(self.trainer.global_step)
+
+        # Smooth propagator warmup: ramp alpha from 0→1 over warmup_steps
+        warmup_steps = self.config.training.warmup_steps
+        step = self.trainer.global_step
+        if warmup_steps > 0 and step <= warmup_steps:
+            alpha = step / warmup_steps
+            self.model.set_propagator_alpha(alpha)
+        elif not self.model.propagator_enabled:
+            self.model.set_propagator_alpha(1.0)
 
         token_ids, token_freqs = batch
         if getattr(self.config.training, "low_vram_mode", False):
@@ -144,6 +151,8 @@ class SEMLightningModule(L.LightningModule):
         return {"loss": loss}
 
     def on_after_backward(self):
+        if self.trainer.global_step % 50 != 0:
+            return
         for name, param in self.named_parameters():
             if param.grad is not None:
                 if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
@@ -163,9 +172,10 @@ class SEMLightningModule(L.LightningModule):
     def on_train_batch_end(self, outputs, batch, batch_idx):
         if self.ema_teacher is not None:
             self.ema_teacher.update(self.model)
-        for name, param in self.named_parameters():
-            if torch.isnan(param.data).any() or torch.isinf(param.data).any():
-                logger.error(f"CRITICAL ERROR: NaN/Inf parameter {name}")
+        if self.trainer.global_step % 50 == 0:
+            for name, param in self.named_parameters():
+                if torch.isnan(param.data).any() or torch.isinf(param.data).any():
+                    logger.error(f"CRITICAL ERROR: NaN/Inf parameter {name}")
 
     def configure_optimizers(self):
         # SEOP Fix 41: Per-layer LR scaling to balance gradient flow
@@ -202,9 +212,9 @@ class SEMLightningModule(L.LightningModule):
 
         optimizer = ComplexAdamW(
             param_groups,
-            lr=base_lr,  # Default LR (overridden by param groups)
+            lr=base_lr,
             weight_decay=self.config.training.weight_decay,
-            temperature=1e-5,
+            temperature=0,
         )
 
         # IPEX optimizer wrapping for XPU (if available)

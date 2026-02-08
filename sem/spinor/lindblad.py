@@ -84,8 +84,10 @@ class LindbladDissipation(nn.Module):
         # Initialize as diagonal-dominant for stability
         with torch.no_grad():
             for k in range(num_lindblad_ops):
-                # Add diagonal boost to prevent collapse
                 self.L_real[k].diagonal().add_(0.1)
+
+        self._cached_L_dag_L: Optional[Tensor] = None
+        self._cache_version: int = -1
 
     @property
     def gamma(self) -> float:
@@ -95,29 +97,25 @@ class LindbladDissipation(nn.Module):
         )
         return gamma.item()
 
+    def invalidate_cache(self):
+        self._cached_L_dag_L = None
+
     def compute_lindblad_term(self) -> Tensor:
         """Compute Σ_k L_k† L_k (the dissipation operator).
 
         Returns:
             L_dag_L_sum: [D, D] complex64 - Sum of L_k† L_k operators
         """
-        # Construct complex Lindblad operators
+        if self._cached_L_dag_L is not None and not self.training:
+            return self._cached_L_dag_L
+
         L = safe_complex(self.L_real, self.L_imag)  # [K, D, D]
-
-        # NOTE: Without jump terms, only A = Σ_k L_k† L_k matters for the
-        # deterministic drift. Individual L_k are retained for:
-        #   (1) future jump-term implementations,
-        #   (2) per-operator analysis/regularization,
-        #   (3) gradient diversity (K small matrices can train differently than one A).
-
-        # Compute L† for each operator
         L_dag = L.conj().transpose(-2, -1)  # [K, D, D]
-
-        # Compute L_k† L_k for each k
         L_dag_L = torch.bmm(L_dag, L)  # [K, D, D]
-
-        # Sum over all Lindblad operators
         L_dag_L_sum = L_dag_L.sum(dim=0)  # [D, D]
+
+        if not self.training:
+            self._cached_L_dag_L = L_dag_L_sum
 
         return L_dag_L_sum
 
