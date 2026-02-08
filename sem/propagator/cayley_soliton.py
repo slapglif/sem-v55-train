@@ -30,6 +30,11 @@ from . import cg_solver as _cg_mod
 from .cg_solver import cg_solve, cg_solve_sparse
 from .unitarity_check import check_unitarity
 from sem.spinor.complex_ops import complex_mul_real
+from .chebyshev_kpm import (
+    chebyshev_kpm_solve,
+    estimate_spectral_radius,
+    resolvent_chebyshev_coeffs,
+)
 
 
 class CayleySolitonPropagator(nn.Module):
@@ -58,6 +63,8 @@ class CayleySolitonPropagator(nn.Module):
         cg_tol_late: float = 1e-6,
         cg_tol_warmup_end: int = 2000,
         cg_tol_mid_end: int = 50000,
+        use_chebyshev_kpm: bool = False,
+        chebyshev_degree: int = 12,
     ):
         super().__init__()
         self.dim = dim
@@ -78,6 +85,8 @@ class CayleySolitonPropagator(nn.Module):
         self.lazy_cg_tol = lazy_cg_tol
         self.direct_solve = direct_solve
         self.pit_gamma = pit_gamma
+        self.use_chebyshev_kpm = use_chebyshev_kpm
+        self.chebyshev_degree = chebyshev_degree
         # CG skip statistics for monitoring
         self._cg_skip_count: int = 0
         self._cg_total_count: int = 0
@@ -95,6 +104,21 @@ class CayleySolitonPropagator(nn.Module):
         self.hamiltonian = MultiScaleHamiltonian(
             dim, num_scales=num_scales, base_sparsity=laplacian_sparsity
         )
+
+        if self.use_chebyshev_kpm:
+            # Compute initial λ_max from Gershgorin bound on initial weights
+            self.hamiltonian.cache_weights()
+            _lmax = estimate_spectral_radius(self.hamiltonian)
+            self.hamiltonian.clear_cache()
+            _lmax = max(_lmax, 1e-8)
+            # Initialize Chebyshev coefficients from analytical resolvent
+            init_coeffs = resolvent_chebyshev_coeffs(
+                alpha=dt / 2.0,
+                lambda_max=_lmax,
+                degree=chebyshev_degree,
+            )
+            self.cheby_coeffs = nn.Parameter(init_coeffs)
+            self.register_buffer("_cheby_lambda_max", torch.tensor(_lmax))
 
     def get_effective_cg_tol(self) -> float:
         """Return CG tolerance for the current training step."""
@@ -199,21 +223,61 @@ class CayleySolitonPropagator(nn.Module):
                     time.perf_counter() - t_rhs
                 )
 
+            if self.use_chebyshev_kpm:
+                # Update λ_max from current Hamiltonian weights (Gershgorin bound)
+                _diag = self.hamiltonian.get_diagonal().real
+                _lmax = float(2.0 * _diag.max().item())
+                _lmax = max(_lmax, 1e-8)
+                self._cheby_lambda_max.fill_(_lmax)
+
+                out_r, out_i = chebyshev_kpm_solve(
+                    matvec_fn=self.hamiltonian.matvec_real_fused,
+                    rhs_r=rhs_r,
+                    rhs_i=rhs_i,
+                    coeffs=self.cheby_coeffs,
+                    lambda_max=_lmax,
+                )
+
+                psi_out = torch.view_as_complex(
+                    torch.stack([out_r, out_i], dim=-1).contiguous()
+                )
+                self._psi_cache = psi_out.detach().clone()
+                self.hamiltonian.clear_cache()
+
+                if self.check_unitarity_flag and not self.training:
+                    check_unitarity(psi, psi_out)
+
+                if _t:
+                    self._timing_stats.setdefault("total", []).append(
+                        time.perf_counter() - t0
+                    )
+
+                return psi_out
+
             if self.direct_solve:
                 H = self.hamiltonian.get_hamiltonian_dense()
                 I = torch.eye(D, dtype=H.dtype, device=H.device)
                 A_plus = I + 1j * half_dt * H
                 rhs = torch.complex(rhs_r, rhs_i)
-                # Reshape for batch processing: [B, S, D] -> [B*S, D]
                 batch_size, seq_len, _ = rhs.shape
                 rhs_flat = rhs.reshape(batch_size * seq_len, D)
+                # Solve in float64: Graph Laplacians have a zero eigenvalue, so
+                # when dt*λ_max is large, float32 loses the I term in I+iHdt/2,
+                # making the matrix numerically singular. float64 preserves it.
+                orig_dtype = rhs_flat.dtype
+                A64 = A_plus.to(torch.complex128)
+                rhs64 = rhs_flat.to(torch.complex128)
                 try:
-                    psi_out_flat = torch.linalg.solve(A_plus, rhs_flat.T).T
+                    psi_out_flat = torch.linalg.solve(A64, rhs64.T).T.to(orig_dtype)
                 except torch._C._LinAlgError:
-                    A_jittered = A_plus + 1e-6 * torch.eye(
-                        D, dtype=A_plus.dtype, device=A_plus.device
+                    import warnings
+
+                    warnings.warn(
+                        "Cayley direct_solve: singular even in float64, returning identity",
+                        RuntimeWarning,
+                        stacklevel=2,
                     )
-                    psi_out_flat = torch.linalg.solve(A_jittered, rhs_flat.T).T
+                    psi_out_flat = rhs_flat
                 psi_out = psi_out_flat.reshape(batch_size, seq_len, D)
                 self._psi_cache = psi_out.detach().clone()
 
@@ -379,6 +443,8 @@ class CayleySolitonStack(nn.Module):
         cg_tol_late: float = 1e-6,
         cg_tol_warmup_end: int = 2000,
         cg_tol_mid_end: int = 50000,
+        use_chebyshev_kpm: bool = False,
+        chebyshev_degree: int = 12,
     ):
         super().__init__()
         self.layers = nn.ModuleList(
@@ -400,6 +466,8 @@ class CayleySolitonStack(nn.Module):
                     cg_tol_late=cg_tol_late,
                     cg_tol_warmup_end=cg_tol_warmup_end,
                     cg_tol_mid_end=cg_tol_mid_end,
+                    use_chebyshev_kpm=use_chebyshev_kpm,
+                    chebyshev_degree=chebyshev_degree,
                 )
                 for _ in range(num_layers)
             ]

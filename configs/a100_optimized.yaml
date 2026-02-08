@@ -31,6 +31,8 @@ propagator:
   laplacian_sparsity: 5
   lazy_cg: true
   lazy_cg_tol: 1.0e-6
+  use_chebyshev_kpm: true
+  chebyshev_degree: 12
 
 quantizer:
   codebook_size: 256

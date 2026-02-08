@@ -61,6 +61,10 @@ class PropagatorConfig:
     cg_tol_late: float = 1e-6  # Tight tolerance for convergence
     cg_tol_warmup_end: int = 2000  # Step to switch warmup → mid
     cg_tol_mid_end: int = 50000  # Step to switch mid → late
+    use_chebyshev_kpm: bool = (
+        False  # Use KPM Chebyshev expansion instead of CG/direct solve
+    )
+    chebyshev_degree: int = 12  # Number of Chebyshev polynomial terms for KPM
 
 
 @dataclass
