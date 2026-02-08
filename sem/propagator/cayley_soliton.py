@@ -27,7 +27,7 @@ from torch import Tensor
 
 from .hamiltonian import MultiScaleHamiltonian
 from . import cg_solver as _cg_mod
-from .cg_solver import cg_solve, cg_solve_sparse
+from .cg_solver import cg_solve, cg_solve_sparse, AdaptiveCGSolver
 from .unitarity_check import check_unitarity
 from sem.spinor.complex_ops import complex_mul_real
 
@@ -70,6 +70,10 @@ class CayleySolitonPropagator(nn.Module):
         self._cg_total_count: int = 0
         self.timing_enabled: bool = False
         self._timing_stats: dict = {}
+        
+        # SEOP PR #3: Adaptive CG tolerance scheduler
+        self._adaptive_cg = AdaptiveCGSolver()
+        self._training_step = 0
 
         # SEOP Fix 9: Per-dimension Kerr coefficient
         # Scalar α applies uniform nonlinear coupling to all feature channels.
@@ -246,11 +250,14 @@ class CayleySolitonPropagator(nn.Module):
             else:
                 if _t:
                     t_cg = time.perf_counter()
+                # SEOP PR #3: Use adaptive tolerance for faster early training
+                adaptive_tol = self._adaptive_cg.get_tolerance()
+                adaptive_max_iter = self._adaptive_cg.get_adaptive_max_iter(self.cg_max_iter)
                 psi_out_real_block = cg_solve_sparse(
                     a_minus_matvec_wrapped,
                     rhs_real_block,
-                    self.cg_max_iter,
-                    self.cg_tol,
+                    adaptive_max_iter,
+                    max(self.cg_tol, adaptive_tol),  # Ensure we don't go below base tol
                     precond=block_jacobi_precond,
                     x0=x0,
                 )
@@ -276,6 +283,11 @@ class CayleySolitonPropagator(nn.Module):
                 )
 
             return psi_out
+
+    def set_training_step(self, step: int):
+        """Update training step for adaptive CG tolerance."""
+        self._training_step = step
+        self._adaptive_cg.update_step(step)
 
     @property
     def cg_skip_rate(self) -> float:
@@ -362,3 +374,8 @@ class CayleySolitonStack(nn.Module):
     def reset_cg_stats(self):
         for layer in self.layers:
             cast(CayleySolitonPropagator, layer).reset_cg_stats()
+    
+    def set_training_step(self, step: int):
+        """Update training step for adaptive CG tolerance in all layers."""
+        for layer in self.layers:
+            cast(CayleySolitonPropagator, layer).set_training_step(step)

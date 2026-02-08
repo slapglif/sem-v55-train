@@ -22,6 +22,8 @@ class GraphLaplacianHamiltonian(nn.Module):
     edge_weights: nn.Parameter
     _cached_w: Tensor | None
     _cached_degree: Tensor | None
+    _cached_A_csr: torch.sparse.Tensor | None
+    _csr_ready: bool
 
     """Learnable sparse Graph Laplacian Hamiltonian.
 
@@ -49,6 +51,8 @@ class GraphLaplacianHamiltonian(nn.Module):
         self._cached_w = None
         self._cached_degree = None
         self._cached_dense_A = None
+        self._cached_A_csr = None
+        self._csr_ready = False
         # SEOP Fix 24: Pre-build symmetric sparse indices to avoid reconstruction
         self._cached_sparse_idx: Tensor | None = None
         self.register_buffer("_sparse_idx_sym", self._build_symmetric_indices(edges))
@@ -100,6 +104,20 @@ class GraphLaplacianHamiltonian(nn.Module):
         idx = torch.cat([torch.stack([rows, cols]), torch.stack([cols, rows])], dim=1)
         return idx
 
+    def build_sparse_matrix_csr(self, w: Tensor) -> torch.sparse.Tensor:
+        """Build sparse adjacency matrix in CSR format.
+        
+        SEOP PR #1: CSR format provides faster matvec than COO.
+        """
+        D = self.dim
+        rows, cols = self.edge_indices[0], self.edge_indices[1]
+        # Symmetric weights
+        w_sym = torch.cat([w, w])
+        idx_sym = self._sparse_idx_sym
+        # Build in COO then convert to CSR
+        A_coo = torch.sparse_coo_tensor(idx_sym, w_sym, (D, D))
+        return A_coo.to_sparse_csr()
+
     def get_hamiltonian_dense(self) -> Tensor:
         """Build dense Hermitian Hamiltonian matrix.
 
@@ -150,12 +168,20 @@ class GraphLaplacianHamiltonian(nn.Module):
             self._cached_dense_A = A_dense
         else:
             self._cached_dense_A = None
+        
+        # PR #1: Cache CSR matrix (not on XPU - CSR not well supported)
+        if not self._csr_ready or self.training:
+            if device.type != "xpu":
+                self._cached_A_csr = self.build_sparse_matrix_csr(self._cached_w)
+            self._csr_ready = True
 
     def clear_cache(self):
         """Clear cached weights."""
         self._cached_w = None
         self._cached_degree = None
         self._cached_dense_A = None
+        self._cached_A_csr = None
+        self._csr_ready = False
 
     def get_diagonal(self) -> Tensor:
         """Get diagonal of Laplacian H: diag(H) = degree vector.
