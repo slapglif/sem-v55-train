@@ -82,6 +82,33 @@ class SamplerConfig:
     top_k: int = 50
     top_p: float = 0.95
 
+    # Modern sampling methods (SEOP Fix 59: composable LogitsProcessor chain)
+    min_p: float = 0.0  # Discard tokens with P < min_p * P_max. 0.0 = disabled
+    typical_p: float = 1.0  # Typical sampling: keep tokens near expected information content. 1.0 = disabled
+    repetition_penalty: float = (
+        1.0  # Multiplicative penalty for tokens already in context. 1.0 = disabled
+    )
+    frequency_penalty: float = (
+        0.0  # Additive penalty proportional to token count in context. 0.0 = disabled
+    )
+    presence_penalty: float = (
+        0.0  # Additive one-time penalty for tokens present in context. 0.0 = disabled
+    )
+    no_repeat_ngram_size: int = 0  # Ban repeating n-grams of this size. 0 = disabled
+    top_a: float = (
+        0.0  # Top-A sampling: keep tokens with P >= top_a * P_max². 0.0 = disabled
+    )
+    epsilon_cutoff: float = (
+        0.0  # Truncation: discard tokens with P < epsilon. 0.0 = disabled
+    )
+    eta_cutoff: float = 0.0  # Eta sampling: entropy-adaptive cutoff. 0.0 = disabled
+    temperature_last: bool = (
+        False  # Apply temperature AFTER filtering (llama.cpp style). Default: before
+    )
+    sampler_seed: Optional[int] = (
+        None  # Fixed seed for reproducible sampling. None = random
+    )
+
 
 @dataclass
 class TrainingConfig:

@@ -44,6 +44,16 @@ sampler:
   temperature: 1.0
   top_k: 50
   top_p: 0.95
+  min_p: 0.0
+  typical_p: 1.0
+  repetition_penalty: 1.0
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+  no_repeat_ngram_size: 0
+  top_a: 0.0
+  epsilon_cutoff: 0.0
+  eta_cutoff: 0.0
+  temperature_last: false
 
 training:
   # SEOP Fix 58: GPU Saturation settings (batch=8, 16 OOM'd)

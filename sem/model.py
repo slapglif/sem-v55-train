@@ -21,6 +21,7 @@ from .spinor.hybrid_automata import HybridAutomata
 from .spinor.quaternion import QuaternionicEscape
 from .propagator.cayley_soliton import CayleySolitonStack
 from .sampler.born_collapse import BornCollapseSampler
+from .sampler.logits_processors import build_processor_chain
 from .utils.complex_layernorm import ComplexRMSNorm
 
 # Optional imports
@@ -533,10 +534,12 @@ class SEMModel(nn.Module):
         # 5. Final normalization before collapse
         self.final_norm = ComplexRMSNorm(c.model.hidden_dim)
 
-        # 6. Born Collapse Sampler
+        # 6. Born Collapse Sampler with composable processor chain
+        self._sampler_processors = build_processor_chain(c.sampler)
         self.sampler = BornCollapseSampler(
             hidden_dim=c.model.hidden_dim,
             vocab_size=c.model.vocab_size,
+            processors=self._sampler_processors,
             temperature=c.sampler.temperature,
             top_k=c.sampler.top_k,
             top_p=c.sampler.top_p,
@@ -658,7 +661,11 @@ class SEMModel(nn.Module):
         psi = self.final_norm(psi)  # [B, S, D] complex64
 
         # 5. Collapse: log-linear projection (SEOP Fix 48)
-        output = self.sampler(psi, sample=not self.training)
+        output = self.sampler(
+            psi,
+            input_ids=token_ids if not self.training else None,
+            sample=not self.training,
+        )
 
         # Expose monitoring metric for trainers/curriculum.
         output["unitary_divergence"] = unitary_divergence
@@ -770,37 +777,43 @@ class SEMModel(nn.Module):
         self,
         prompt_ids: Tensor,
         max_new_tokens: int = 100,
-        temperature: float = 1.0,
-        top_k: int = 50,
-        top_p: float = 0.95,
+        temperature: Optional[float] = None,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
         eos_token_id: Optional[int] = 1,
+        processors: Optional["LogitsProcessorList"] = None,
     ) -> Tensor:
         """Autoregressive generation.
 
         Args:
             prompt_ids: [1, S] prompt token indices
             max_new_tokens: Maximum tokens to generate
-            temperature: Sampling temperature
-            top_k: Top-k filtering
-            top_p: Nucleus filtering
+            temperature: Override sampling temperature (legacy path)
+            top_k: Override top-k filtering (legacy path)
+            top_p: Override nucleus filtering (legacy path)
+            eos_token_id: Stop token. None = generate until max_new_tokens
+            processors: Override processor chain for this generation call
 
         Returns:
             [1, S + max_new_tokens] generated token indices
         """
+        from .sampler.logits_processors import LogitsProcessorList
+
         self.eval()
         generated = prompt_ids.clone()
+
+        saved_processors = self.sampler.processors
+        if processors is not None:
+            self.sampler.processors = processors
 
         finished = torch.zeros(
             generated.shape[0], device=generated.device, dtype=torch.bool
         )
 
         for _ in range(max_new_tokens):
-            # Crop to max sequence length
             input_ids = generated[:, -self.config.model.max_seq_length :]
 
-            # Forward pass
             psi = self._encode_and_context(input_ids)
-            # SEOP Fix 53: Use the same smooth alpha blending in generation.
             effective_alpha = self._propagator_alpha
             if self.propagator_enabled and effective_alpha == 0.0:
                 effective_alpha = 1.0
@@ -810,17 +823,16 @@ class SEMModel(nn.Module):
             psi = self.final_norm(psi)
             output = self.sampler(
                 psi,
+                input_ids=generated,
                 temperature=temperature,
                 top_k=top_k,
                 top_p=top_p,
                 sample=True,
             )
 
-            # Get next token (last position)
             next_token = output["tokens"][:, -1:]
 
             if eos_token_id is not None:
-                # If some sequences already finished, keep emitting EOS for them.
                 eos = torch.tensor(
                     int(eos_token_id), device=generated.device, dtype=next_token.dtype
                 )
@@ -836,6 +848,7 @@ class SEMModel(nn.Module):
                 if bool(finished.all()):
                     break
 
+        self.sampler.processors = saved_processors
         return generated
 
     def _encode_and_context(

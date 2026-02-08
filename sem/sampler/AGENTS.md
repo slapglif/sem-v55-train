@@ -5,35 +5,53 @@
 
 ## Purpose
 
-Collapse/sampling head converting complex hidden states into vocabulary logits and sampled tokens. Current implementation uses a log-linear projection over real/imag parts (SEOP Fix 48) rather than a quadratic Born rule.
+Collapse/sampling head converting complex hidden states into vocabulary logits and sampled tokens. Uses log-linear projection (SEOP Fix 48) with a composable LogitsProcessor chain (SEOP Fix 59) for modern sampling methods.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
 | `__init__.py` | Module exports |
-| `born_collapse.py` | `BornCollapseSampler` - wavefunction → probabilities → tokens |
+| `born_collapse.py` | `BornCollapseSampler` - wavefunction → logits → processor chain → tokens |
+| `logits_processors.py` | Composable `LogitsProcessor` classes + `build_processor_chain` factory |
 
 ## For AI Agents
 
 ### Working In This Directory
 
 - **Log-linear head**: `logits = W_r·Re(psi) + W_i·Im(psi) + b`
-- **Sampling**: Temperature scaling, top-k filtering, top-p (nucleus) filtering
+- **Processor chain**: Composable processors applied in order: penalties → temperature → filters
 - **Weight tying**: `SEMModel` ties `proj_real.weight` to `encoder.embedding.weight`
 
 ### Key Components
 
 ```python
 class BornCollapseSampler(nn.Module):
-    """Log-linear collapse: ψ → logits → probabilities → tokens.
+    # Projects complex psi to logits, applies LogitsProcessorList, samples
 
-    Steps:
-    1. Project Re/Im(ψ) to logits
-    2. Apply temperature, top-k, top-p filtering
-    3. Softmax + sample (or return logits/log_probs)
-    """
+class LogitsProcessorList:
+    # Sequential chain of LogitsProcessor instances
+
+def build_processor_chain(config: SamplerConfig) -> LogitsProcessorList:
+    # Factory: builds chain from SamplerConfig, skipping disabled processors
 ```
+
+### Available Processors
+
+| Processor | Config Field | Disabled Value |
+|-----------|-------------|---------------|
+| RepetitionPenaltyProcessor | `repetition_penalty` | 1.0 |
+| FrequencyPenaltyProcessor | `frequency_penalty` | 0.0 |
+| PresencePenaltyProcessor | `presence_penalty` | 0.0 |
+| NoRepeatNgramProcessor | `no_repeat_ngram_size` | 0 |
+| TemperatureProcessor | `temperature` | 1.0 |
+| TopKProcessor | `top_k` | 0 |
+| TopPProcessor | `top_p` | 1.0 |
+| MinPProcessor | `min_p` | 0.0 |
+| TypicalProcessor | `typical_p` | 1.0 |
+| TopAProcessor | `top_a` | 0.0 |
+| EpsilonCutoffProcessor | `epsilon_cutoff` | 0.0 |
+| EtaCutoffProcessor | `eta_cutoff` | 0.0 |
 
 ### Testing Requirements
 
@@ -41,17 +59,11 @@ class BornCollapseSampler(nn.Module):
 uv run pytest tests/test_born.py -v
 ```
 
-### Common Patterns
-
-- **Temperature**: `temperature` scales logits before softmax
-- **Top-k**: Keep only `top_k` highest probability tokens
-- **Top-p**: Keep tokens until cumulative probability ≥ `top_p`
-- **Training loss**: computed in `sem/model.py` via `torch.nn.functional.cross_entropy`
-
 ## Dependencies
 
 ### Internal
-- `sem/model.py` - Computes CE loss from logits + optional unitary regularization
+- `sem/config.py` - `SamplerConfig` dataclass
+- `sem/model.py` - Wires processor chain, passes `input_ids` for repetition penalties
 
 ### External
 - `torch` - Tensor operations
