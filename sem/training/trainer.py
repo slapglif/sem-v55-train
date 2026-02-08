@@ -16,8 +16,10 @@ from dataclasses import asdict
 
 from ..config import SEMConfig
 from ..model import SEMModel
+
 try:
     from ..model_v8 import SEMV8Model
+
     HAS_V8 = True
 except ImportError:
     HAS_V8 = False
@@ -65,7 +67,7 @@ class SEMTrainer:
         self.dry_run = dry_run
 
         # Build model
-        if getattr(config.model, 'model_version', 'v55') == 'v8' and HAS_V8:
+        if getattr(config.model, "model_version", "v55") == "v8" and HAS_V8:
             logger.info("Building SEM V8.0 model...")
             self.model = SEMV8Model(config).to(self.device)
         else:
@@ -127,21 +129,29 @@ class SEMTrainer:
 
         # Optimizer with per-layer LR scaling (SEOP Fix 48)
         base_lr = config.training.learning_rate
-        encoder_lr_scale = getattr(config.training, 'encoder_lr_scale', 0.01)
+        encoder_lr_scale = getattr(config.training, "encoder_lr_scale", 0.01)
         encoder_params = []
         other_params = []
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                if name.startswith('encoder'):
+                if name.startswith("encoder"):
                     encoder_params.append(param)
                 else:
                     other_params.append(param)
         param_groups = [
-            {'params': encoder_params, 'lr': base_lr * encoder_lr_scale, 'name': 'encoder'},
-            {'params': other_params, 'lr': base_lr, 'name': 'other'},
+            {
+                "params": encoder_params,
+                "lr": base_lr * encoder_lr_scale,
+                "name": "encoder",
+            },
+            {"params": other_params, "lr": base_lr, "name": "other"},
         ]
-        logger.info(f"Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}")
-        logger.info(f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}")
+        logger.info(
+            f"Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}"
+        )
+        logger.info(
+            f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}"
+        )
         self.optimizer = ComplexAdamW(
             param_groups,
             lr=base_lr,
@@ -223,7 +233,9 @@ class SEMTrainer:
         if config.training.gradient_checkpointing:
             self._enable_gradient_checkpointing()
         else:
-            logger.info("Gradient checkpointing DISABLED (config.training.gradient_checkpointing=False)")
+            logger.info(
+                "Gradient checkpointing DISABLED (config.training.gradient_checkpointing=False)"
+            )
 
     def _enable_gradient_checkpointing(self):
         """Enable gradient checkpointing on Mamba and Cayley layers.
@@ -450,7 +462,9 @@ class SEMTrainer:
                 f"FATAL: {self._consecutive_nan_steps} consecutive NaN steps. "
                 f"Model is irrecoverable. Stopping training."
             )
-            raise RuntimeError(f"Training diverged: {self._consecutive_nan_steps} consecutive NaN steps")
+            raise RuntimeError(
+                f"Training diverged: {self._consecutive_nan_steps} consecutive NaN steps"
+            )
 
     def train(self):
         """Main training loop."""
@@ -653,7 +667,9 @@ class SEMTrainer:
                 # Trigger cosine decay when warmup completes
                 if self.global_step == self.config.training.warmup_steps:
                     self.scheduler.begin_decay()
-                    logger.info(f"[SCHEDULER] Triggered cosine decay at step {self.global_step}")
+                    logger.info(
+                        f"[SCHEDULER] Triggered cosine decay at step {self.global_step}"
+                    )
                 t_optim_end = _sync_and_time(self.device.type)
                 # Reset NaN counter on successful step
                 self._consecutive_nan_steps = 0
@@ -704,6 +720,9 @@ class SEMTrainer:
                         )
 
                 self.global_step += 1
+                # Wire adaptive CG tolerance schedule to propagator
+                if hasattr(self.model, "propagator"):
+                    self.model.propagator.set_training_step(self.global_step)
                 current_phase = "metrics"
 
                 if not compile_warmup_done and self.global_step == 1:
@@ -742,10 +761,10 @@ class SEMTrainer:
             )
 
             # V8 diagnostic logging
-            if hasattr(self.model, 'get_diagnostics'):
+            if hasattr(self.model, "get_diagnostics"):
                 diag = self.model.get_diagnostics()
                 for k, v in diag.items():
-                    step_metrics[f'train/{k}'] = v
+                    step_metrics[f"train/{k}"] = v
 
             # Console logging
             self.console_cb.on_step_end(

@@ -189,7 +189,10 @@ class SEMModel(nn.Module):
             # Apply unitarity regularization strength from config.
             unitary_lambda = float(getattr(self.config.training, "unitary_lambda", 0.0))
             if unitary_lambda != 0.0:
-                loss = loss + unitary_lambda * unitary_divergence
+                # SEOP Fix 34: Detach unitary_divergence from gradient graph.
+                # Unitarity is enforced structurally by Cayley transform;
+                # loss term is purely a monitoring/regularization signal.
+                loss = loss + unitary_lambda * unitary_divergence.detach()
             output["loss"] = loss
 
         return output

@@ -5,8 +5,10 @@ from typing import Any, Dict, Optional
 import math
 
 from ..model import SEMModel
+
 try:
     from ..model_v8 import SEMV8Model
+
     HAS_V8 = True
 except ImportError:
     HAS_V8 = False
@@ -22,7 +24,7 @@ class SEMLightningModule(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
-        if getattr(config.model, 'model_version', 'v55') == 'v8' and HAS_V8:
+        if getattr(config.model, "model_version", "v55") == "v8" and HAS_V8:
             self.model = SEMV8Model(config)
         else:
             self.model = SEMModel(config)
@@ -44,7 +46,7 @@ class SEMLightningModule(L.LightningModule):
                 def checkpointed_forward(*args, **kwargs):
                     # CRITICAL: Disable caching during checkpointed forward to ensure
                     # deterministic behavior (same tensors created in forward & recomputation)
-                    if hasattr(module, '_psi_cache'):
+                    if hasattr(module, "_psi_cache"):
                         old_cache = module._psi_cache
                         module._psi_cache = None
                         try:
@@ -55,7 +57,7 @@ class SEMLightningModule(L.LightningModule):
                                 *args,
                                 use_reentrant=False,
                                 preserve_rng_state=False,
-                                **kwargs
+                                **kwargs,
                             )
                         finally:
                             module._psi_cache = old_cache
@@ -67,7 +69,7 @@ class SEMLightningModule(L.LightningModule):
                             *args,
                             use_reentrant=False,
                             preserve_rng_state=False,
-                            **kwargs
+                            **kwargs,
                         )
 
                 module.forward = checkpointed_forward
@@ -95,6 +97,10 @@ class SEMLightningModule(L.LightningModule):
     def training_step(self, batch, batch_idx):
         # SEOP Fix 48: Propagator permanently disabled — CG solver non-convergence (residual 0.39 >> tol 2e-3)
         # injects 14-19% norm corruption. Only 15.4K params (0.08% of model) — negligible capacity.
+
+        # Wire adaptive CG tolerance schedule to propagator
+        if hasattr(self.model, "propagator"):
+            self.model.propagator.set_training_step(self.trainer.global_step)
 
         token_ids, token_freqs = batch
         if getattr(self.config.training, "low_vram_mode", False):
@@ -132,10 +138,10 @@ class SEMLightningModule(L.LightningModule):
             self.log("train/unitary_div", output["unitary_divergence"], prog_bar=True)
 
         # V8 diagnostic logging
-        if hasattr(self.model, 'get_diagnostics'):
+        if hasattr(self.model, "get_diagnostics"):
             diag = self.model.get_diagnostics()
             for k, v in diag.items():
-                self.log(f'train/{k}', v, prog_bar=False)
+                self.log(f"train/{k}", v, prog_bar=False)
 
         # Return dict so callbacks can access outputs["loss"]
         return {"loss": loss}
@@ -168,7 +174,7 @@ class SEMLightningModule(L.LightningModule):
         # SEOP Fix 41: Per-layer LR scaling to balance gradient flow
         # Encoder gradients are ~1000x larger than downstream layers
         base_lr = self.config.training.learning_rate
-        encoder_lr_scale = getattr(self.config.training, 'encoder_lr_scale', 0.01)
+        encoder_lr_scale = getattr(self.config.training, "encoder_lr_scale", 0.01)
 
         # Separate parameter groups with different LRs
         encoder_params = []
@@ -176,18 +182,26 @@ class SEMLightningModule(L.LightningModule):
 
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                if name.startswith('encoder'):
+                if name.startswith("encoder"):
                     encoder_params.append(param)
                 else:
                     other_params.append(param)
 
         param_groups = [
-            {'params': encoder_params, 'lr': base_lr * encoder_lr_scale, 'name': 'encoder'},
-            {'params': other_params, 'lr': base_lr, 'name': 'other'},
+            {
+                "params": encoder_params,
+                "lr": base_lr * encoder_lr_scale,
+                "name": "encoder",
+            },
+            {"params": other_params, "lr": base_lr, "name": "other"},
         ]
 
-        logger.info(f"SEOP Fix 41: Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}")
-        logger.info(f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}")
+        logger.info(
+            f"SEOP Fix 41: Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}"
+        )
+        logger.info(
+            f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}"
+        )
 
         optimizer = ComplexAdamW(
             param_groups,
