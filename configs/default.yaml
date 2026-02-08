@@ -1,45 +1,58 @@
 # SEM V5.5 "Lean Crystal" - Default Configuration
+# Sweep-optimized params from 4xA100 cloud sweep (2026-02-08)
+# HP best: 6.982, NAS best: 6.979
+
 model:
-  hidden_dim: 256          # Complex dim = 128 complex pairs
-  num_layers: 8            # Cayley propagation depth
-  vocab_size: 32768        # Standard BPE vocabulary
-  max_seq_length: 2048     # Sequence length
+  hidden_dim: 256
+  num_layers: 8
+  vocab_size: 32768
+  max_seq_length: 2048
 
 encoder:
-  sdr_sparsity: 32         # Active units in SDR (out of hidden_dim)
-  sdr_candidates: 128      # 4x sparsity candidates for Sinkhorn
-  sinkhorn_epsilon: 0.05   # Entropy regularization strength
-  sinkhorn_max_iter: 50
+  sdr_sparsity: 16
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.07
+  sinkhorn_max_iter: 90
   sinkhorn_tol: 1.0e-3
+  sinkhorn_auto_epsilon: true
+  sinkhorn_auto_epsilon_scale: 0.04
+  soft_sparse: true
+  soft_sparse_temp: 0.1
 
 spinor:
-  block_size: 8            # Spinor block dimension
-  num_blocks: 32           # hidden_dim / block_size
-  state_dim: 64            # Complex SSM state dimension
-  mimo_groups: 8           # MIMO parallel groups
-  d_conv: 4                # Local convolution width
+  block_size: 16
+  num_blocks: 16
+  state_dim: 32
+  mimo_groups: 4
+  d_conv: 4
+  memory_horizon_ratio: 0.16
 
 propagator:
-  cayley_dt: 0.1           # Time step
-  cg_max_iter: 20          # Conjugate gradient iterations
-  cg_tol: 1.0e-6           # CG residual tolerance
-  nonlinear_alpha: 0.1     # Kerr nonlinearity strength
-  laplacian_sparsity: 5    # Average nonzeros per row in H
+  cayley_dt: 0.02
+  cg_max_iter: 5
+  cg_tol: 1.0e-6
+  nonlinear_alpha: 0.12
+  laplacian_sparsity: 6
+  lazy_cg: true
+  lazy_cg_tol: 1.0e-6
+  pit_gamma: 0.05
+  use_chebyshev_kpm: true
+  chebyshev_degree: 16
 
 quantizer:
-  codebook_size: 256       # 2^8 codes
-  group_size: 2            # Parameters per VQ group (4.2 BPP target)
+  codebook_size: 256
+  group_size: 2
   fisher_ema_decay: 0.99
-  outlier_percentile: 0.01 # Top 1% -> FP16
-  dead_code_threshold: 100 # Steps before revival
+  outlier_percentile: 0.01
+  dead_code_threshold: 100
 
 sampler:
   temperature: 1.0
-  top_k: 50
-  top_p: 0.95
+  top_k: 40
+  top_p: 0.92
   min_p: 0.0
-  typical_p: 1.0
-  repetition_penalty: 1.0
+  typical_p: 0.92
+  repetition_penalty: 1.43
   frequency_penalty: 0.0
   presence_penalty: 0.0
   no_repeat_ngram_size: 0
@@ -50,9 +63,27 @@ sampler:
 
 training:
   batch_size: 32
-  learning_rate: 3.0e-4
-  weight_decay: 0.01
-  warmup_steps: 1000
+  learning_rate: 8.6e-4
+  weight_decay: 0.002
+  encoder_lr_scale: 0.016
+  warmup_steps: 2000
   max_steps: 100000
-  gradient_clip: 5.0
+  gradient_clip: 17.0
   dtype: complex64
+  unitary_lambda: 0.006
+  unitary_clamp_min: 0.01
+  unitary_clamp_max: 6.9
+  label_smoothing: 0.058
+
+v8:
+  use_lindblad: true
+  use_hybrid_automata: false
+  use_quaternionic: true
+  use_mhc: true
+  mhc_streams: 8
+  mhc_num_iters: 10
+  mhc_tau: 0.031
+  lindblad_gamma: 0.007
+  num_lindblad_ops: 4
+  curvature_threshold: 0.64
+  condition_threshold: 62.0

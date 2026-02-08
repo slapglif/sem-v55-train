@@ -331,7 +331,8 @@ class TestProcessorChain:
         processor_names = [type(p).__name__ for p in chain]
         assert "TopKProcessor" in processor_names
         assert "TopPProcessor" in processor_names
-        assert "RepetitionPenaltyProcessor" not in processor_names
+        assert "RepetitionPenaltyProcessor" in processor_names
+        assert "TypicalProcessor" in processor_names
 
     def test_build_chain_with_all_features(self):
         config = SamplerConfig(
@@ -358,14 +359,27 @@ class TestProcessorChain:
         assert processor_names[4] == "TemperatureProcessor"
 
     def test_temperature_last_moves_temperature(self):
-        config = SamplerConfig(temperature=0.5, temperature_last=True, top_k=10)
+        config = SamplerConfig(
+            temperature=0.5,
+            temperature_last=True,
+            top_k=10,
+            top_p=1.0,
+            typical_p=1.0,
+            repetition_penalty=1.0,
+        )
         chain = build_processor_chain(config)
         processor_names = [type(p).__name__ for p in chain]
         assert processor_names[-1] == "TemperatureProcessor"
         assert processor_names[0] == "TopKProcessor"
 
     def test_all_disabled_produces_empty_chain(self):
-        config = SamplerConfig(temperature=1.0, top_k=0, top_p=1.0)
+        config = SamplerConfig(
+            temperature=1.0,
+            top_k=0,
+            top_p=1.0,
+            typical_p=1.0,
+            repetition_penalty=1.0,
+        )
         chain = build_processor_chain(config)
         assert len(chain) == 0
 

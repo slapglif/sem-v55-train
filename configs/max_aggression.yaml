@@ -1,39 +1,44 @@
 # SEM V5.5 "Lean Crystal" - Max Aggression Configuration (XPU/NPU Optimized)
+# Sweep-optimized params from 4xA100 cloud sweep (2026-02-08)
 # Optimized for: 16GB RAM / 8GB VRAM
-# Part of Wave 6: Trainer XPU & RAM Aggression
 
 model:
-  hidden_dim: 256          # 256 real units (isomorphic to 128 complex pairs)
+  hidden_dim: 256
   num_layers: 8
   vocab_size: 32768
   max_seq_length: 2048
 
 encoder:
-  sdr_sparsity: 8
-  sdr_candidates: 32
-  sinkhorn_epsilon: 0.1
-  sinkhorn_max_iter: 10
-  sinkhorn_tol: 1.0e-2
+  sdr_sparsity: 16
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.07
+  sinkhorn_max_iter: 90
+  sinkhorn_tol: 1.0e-3
+  sinkhorn_auto_epsilon: true
+  sinkhorn_auto_epsilon_scale: 0.04
+  soft_sparse: true
+  soft_sparse_temp: 0.1
 
 spinor:
   block_size: 8
   num_blocks: 32
-  state_dim: 128          # Increased state capacity
-  mimo_groups: 16          # Increased parallelism
+  state_dim: 128
+  mimo_groups: 16
   d_conv: 4
 
 propagator:
-  cayley_dt: 0.005
+  cayley_dt: 0.02
   cg_max_iter: 20
   cg_tol: 1.0e-4
   lazy_cg: false
   direct_solve: true
-  nonlinear_alpha: 0.005
-  laplacian_sparsity: 8
-  pit_gamma: 1.0
+  nonlinear_alpha: 0.12
+  laplacian_sparsity: 6
+  pit_gamma: 0.05
+  use_chebyshev_kpm: true
+  chebyshev_degree: 16
 
 quantizer:
-
   codebook_size: 512
   group_size: 2
   fisher_ema_decay: 0.999
@@ -42,11 +47,11 @@ quantizer:
 
 sampler:
   temperature: 1.0
-  top_k: 50
-  top_p: 0.95
+  top_k: 40
+  top_p: 0.92
   min_p: 0.0
-  typical_p: 1.0
-  repetition_penalty: 1.0
+  typical_p: 0.92
+  repetition_penalty: 1.43
   frequency_penalty: 0.0
   presence_penalty: 0.0
   no_repeat_ngram_size: 0
@@ -61,26 +66,27 @@ training:
   micro_batch_size: 2
   gradient_checkpointing: false
 
-
-  
   # Precision
-  dtype: float32           # Real-Block Isomorphism (R2) mapping
-  
-  # Optimization
-  learning_rate: 5.0e-5  # Increased from 1e-6 (which was far too conservative)
-  weight_decay: 0.05     # Reduced from 0.1 to prevent over-regularization
-  warmup_steps: 2000     # Reduced from 8000 for faster convergence start
-  max_steps: 100000
-  gradient_clip: 5.0     # SEOP Fix 35: raised from 0.5 — prevents gradient death after warmup
-  unitary_lambda: 0.01   # Increased from 0.005 for stronger unitarity enforcement
+  dtype: float32
 
+  # Optimization — sweep-derived
+  learning_rate: 8.6e-4
+  weight_decay: 0.002
+  encoder_lr_scale: 0.016
+  warmup_steps: 2000
+  max_steps: 100000
+  gradient_clip: 17.0
+  unitary_lambda: 0.006
+  unitary_clamp_min: 0.01
+  unitary_clamp_max: 6.9
+  label_smoothing: 0.058
 
   # Data Pipeline (RAM Optimized)
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
   num_workers: 2
   shuffle_buffer_size: 20000
-  
+
   # Scheduler
   scheduler_type: "wsd"
   stable_steps: 0
@@ -95,13 +101,25 @@ training:
   wandb_project: "sem-v55-max-aggression"
   wandb_enabled: true
 
+v8:
+  use_lindblad: true
+  use_hybrid_automata: false
+  use_quaternionic: true
+  use_mhc: true
+  mhc_streams: 4            # Reduced for 8GB VRAM
+  mhc_num_iters: 5          # Reduced for 8GB VRAM
+  mhc_tau: 0.031
+  lindblad_gamma: 0.007
+  num_lindblad_ops: 2        # Reduced for 8GB VRAM
+  curvature_threshold: 0.64
+  condition_threshold: 62.0
+
 curriculum:
   enabled: true
   stages:
-    - min_score: 0         # Start with all data to maximize throughput
+    - min_score: 0
       seq_len: 1024
       min_steps: 10000
-
     - min_score: 4
       seq_len: 2048
       min_steps: 40000
@@ -112,5 +130,5 @@ distillation:
   ema_decay_start: 0.99
   ema_decay_end: 0.9999
   ema_decay_ramp_steps: 10000
-  enable_at_stage: 1       # Defer distillation until stage 1 to avoid OOM (teacher doubles memory)
+  enable_at_stage: 1
   temperature: 1.5

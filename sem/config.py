@@ -18,13 +18,13 @@ class ModelConfig:
 
 @dataclass
 class EncoderConfig:
-    sdr_sparsity: int = 32
+    sdr_sparsity: int = 16
     sdr_candidates: int = 128
-    sinkhorn_epsilon: float = 0.05
-    sinkhorn_max_iter: int = 50
+    sinkhorn_epsilon: float = 0.07
+    sinkhorn_max_iter: int = 90
     sinkhorn_tol: float = 1e-3
-    sinkhorn_auto_epsilon: bool = False  # Scale ε to median(cost) at runtime
-    sinkhorn_auto_epsilon_scale: float = 0.05  # ε = scale * median(cost)
+    sinkhorn_auto_epsilon: bool = True  # Scale ε to median(cost) at runtime
+    sinkhorn_auto_epsilon_scale: float = 0.04  # ε = scale * median(cost)
     soft_sparse: bool = (
         True  # SEOP Fix 48: Enable gradient flow to all codebook entries
     )
@@ -46,15 +46,15 @@ class SpinorConfig:
 
 @dataclass
 class PropagatorConfig:
-    cayley_dt: float = 0.1
+    cayley_dt: float = 0.02
     cg_max_iter: int = 5  # 5 iterations sufficient for training; use 20 for inference
     cg_tol: float = 1e-6
-    nonlinear_alpha: float = 0.1
-    laplacian_sparsity: int = 5
+    nonlinear_alpha: float = 0.12
+    laplacian_sparsity: int = 6
     lazy_cg: bool = True
     lazy_cg_tol: float = 1e-6  # Residual gate tolerance for lazy CG
     direct_solve: bool = False
-    pit_gamma: float = 1.0  # Soliton envelope width (SEOP Fix 29)
+    pit_gamma: float = 0.05  # Soliton envelope width (SEOP Fix 29)
     adaptive_cg_tol: bool = False
     cg_tol_warmup: float = 1e-4  # Loose tolerance during warmup
     cg_tol_mid: float = 1e-5  # Mid-training tolerance
@@ -62,9 +62,9 @@ class PropagatorConfig:
     cg_tol_warmup_end: int = 2000  # Step to switch warmup → mid
     cg_tol_mid_end: int = 50000  # Step to switch mid → late
     use_chebyshev_kpm: bool = (
-        False  # Use KPM Chebyshev expansion instead of CG/direct solve
+        True  # Use KPM Chebyshev expansion instead of CG/direct solve
     )
-    chebyshev_degree: int = 12  # Number of Chebyshev polynomial terms for KPM
+    chebyshev_degree: int = 16  # Number of Chebyshev polynomial terms for KPM
 
 
 @dataclass
@@ -79,14 +79,14 @@ class QuantizerConfig:
 @dataclass
 class SamplerConfig:
     temperature: float = 1.0
-    top_k: int = 50
-    top_p: float = 0.95
+    top_k: int = 40
+    top_p: float = 0.92
 
     # Modern sampling methods (SEOP Fix 59: composable LogitsProcessor chain)
     min_p: float = 0.0  # Discard tokens with P < min_p * P_max. 0.0 = disabled
-    typical_p: float = 1.0  # Typical sampling: keep tokens near expected information content. 1.0 = disabled
+    typical_p: float = 0.92  # Typical sampling: keep tokens near expected information content. 1.0 = disabled
     repetition_penalty: float = (
-        1.0  # Multiplicative penalty for tokens already in context. 1.0 = disabled
+        1.43  # Multiplicative penalty for tokens already in context. 1.0 = disabled
     )
     frequency_penalty: float = (
         0.0  # Additive penalty proportional to token count in context. 0.0 = disabled
@@ -114,16 +114,14 @@ class SamplerConfig:
 class TrainingConfig:
     # Existing fields
     batch_size: int = 32
-    learning_rate: float = 3e-4
-    weight_decay: float = 0.01
+    learning_rate: float = 8.6e-4
+    weight_decay: float = 0.002
     encoder_lr_scale: float = (
-        0.01  # SEOP Fix 41: Encoder LR = base_lr * this (balance gradient flow)
+        0.016  # SEOP Fix 41: Encoder LR = base_lr * this (balance gradient flow)
     )
     warmup_steps: int = 2000  # Changed from 1000
     max_steps: int = 100000
-    gradient_clip: float = (
-        5.0  # SEOP Fix 35: raised from 1.0 — too aggressive, clips useful NLL gradients
-    )
+    gradient_clip: float = 17.0  # SEOP Fix 35: raised from 1.0 — too aggressive, clips useful NLL gradients
     dtype: str = "complex64"
 
     # New fields
@@ -132,13 +130,13 @@ class TrainingConfig:
         False  # Default disabled - causes tensor count mismatch bug
     )
     unitary_lambda: float = (
-        0.01  # SEOP Fix 35: reduced from 0.1 — Cayley enforces unitarity structurally
+        0.006  # SEOP Fix 35: reduced from 0.1 — Cayley enforces unitarity structurally
     )
     unitary_clamp_min: float = (
-        1e-3  # SEOP Fix 35: lower bound for psi energy norm clamping
+        0.01  # SEOP Fix 35: lower bound for psi energy norm clamping
     )
     unitary_clamp_max: float = (
-        10.0  # SEOP Fix 35: upper bound for psi energy norm clamping
+        6.9  # SEOP Fix 35: upper bound for psi energy norm clamping
     )
     low_vram_mode: bool = False
     born_chunk_size: int = 2048
@@ -174,7 +172,7 @@ class TrainingConfig:
     no_amp: bool = False
 
     # SEOP Fix 56: Label smoothing for noisy small-batch training
-    label_smoothing: float = 0.0
+    label_smoothing: float = 0.058
 
 
 @dataclass
@@ -211,16 +209,16 @@ class V8Config:
     """V8.0 model-specific configuration."""
 
     use_lindblad: bool = True
-    use_hybrid_automata: bool = True
+    use_hybrid_automata: bool = False
     use_quaternionic: bool = True
     use_mhc: bool = True
-    mhc_streams: int = 4
+    mhc_streams: int = 8
     mhc_num_iters: int = 10
-    mhc_tau: float = 0.05
-    lindblad_gamma: float = 0.01
+    mhc_tau: float = 0.031
+    lindblad_gamma: float = 0.007
     num_lindblad_ops: int = 4
-    curvature_threshold: float = 0.1
-    condition_threshold: float = 100.0
+    curvature_threshold: float = 0.64
+    condition_threshold: float = 62.0
 
 
 @dataclass

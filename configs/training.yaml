@@ -1,4 +1,6 @@
 # SEM V5.5 "Lean Crystal" - Full Training Configuration
+# Sweep-optimized params from 4xA100 cloud sweep (2026-02-08)
+
 model:
   hidden_dim: 256
   num_layers: 8
@@ -6,11 +8,15 @@ model:
   max_seq_length: 2048
 
 encoder:
-  sdr_sparsity: 32
+  sdr_sparsity: 16
   sdr_candidates: 128
-  sinkhorn_epsilon: 0.05
-  sinkhorn_max_iter: 50
+  sinkhorn_epsilon: 0.07
+  sinkhorn_max_iter: 90
   sinkhorn_tol: 1.0e-3
+  sinkhorn_auto_epsilon: true
+  sinkhorn_auto_epsilon_scale: 0.04
+  soft_sparse: true
+  soft_sparse_temp: 0.1
 
 spinor:
   block_size: 8
@@ -20,11 +26,14 @@ spinor:
   d_conv: 4
 
 propagator:
-  cayley_dt: 0.1
+  cayley_dt: 0.02
   cg_max_iter: 20
   cg_tol: 1.0e-6
-  nonlinear_alpha: 0.1
-  laplacian_sparsity: 5
+  nonlinear_alpha: 0.12
+  laplacian_sparsity: 6
+  pit_gamma: 0.05
+  use_chebyshev_kpm: true
+  chebyshev_degree: 16
 
 quantizer:
   codebook_size: 256
@@ -35,11 +44,11 @@ quantizer:
 
 sampler:
   temperature: 1.0
-  top_k: 50
-  top_p: 0.95
+  top_k: 40
+  top_p: 0.92
   min_p: 0.0
-  typical_p: 1.0
-  repetition_penalty: 1.0
+  typical_p: 0.92
+  repetition_penalty: 1.43
   frequency_penalty: 0.0
   presence_penalty: 0.0
   no_repeat_ngram_size: 0
@@ -51,11 +60,16 @@ sampler:
 training:
   batch_size: 32
   micro_batch_size: 4
-  learning_rate: 3.0e-4
-  weight_decay: 0.01
+  learning_rate: 8.6e-4
+  weight_decay: 0.002
+  encoder_lr_scale: 0.016
   warmup_steps: 2000
   max_steps: 100000
-  gradient_clip: 5.0
+  gradient_clip: 17.0
+  unitary_lambda: 0.006
+  unitary_clamp_min: 0.01
+  unitary_clamp_max: 6.9
+  label_smoothing: 0.058
   gradient_checkpointing: false  # Disabled - causes tensor count mismatch bug
 
   # Data
@@ -79,6 +93,19 @@ training:
   # wandb
   wandb_project: "sem-v55-lean-crystal"
   wandb_enabled: true
+
+v8:
+  use_lindblad: true
+  use_hybrid_automata: false
+  use_quaternionic: true
+  use_mhc: true
+  mhc_streams: 8
+  mhc_num_iters: 10
+  mhc_tau: 0.031
+  lindblad_gamma: 0.007
+  num_lindblad_ops: 4
+  curvature_threshold: 0.64
+  condition_threshold: 62.0
 
 curriculum:
   enabled: true
