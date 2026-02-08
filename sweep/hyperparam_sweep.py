@@ -233,6 +233,7 @@ def train_steps(
     batch_size: int,
     seq_len: int,
     device: str,
+    trial: optuna.Trial | None = None,
 ) -> dict:
     model.train()
     model.propagator_enabled = True
@@ -278,6 +279,16 @@ def train_steps(
 
         losses.append(loss.item())
 
+        # Report to Optuna for pruning — check every 10 steps
+        if trial is not None and step % 10 == 0:
+            trial.report(loss.item(), step)
+            if trial.should_prune():
+                return {
+                    "final_loss": loss.item(),
+                    "losses": losses,
+                    "pruned_at": step,
+                }
+
     elapsed = time.time() - t0
     return {
         "final_loss": losses[-1] if losses else float("inf"),
@@ -299,13 +310,18 @@ def objective(
     torch.manual_seed(42)
     model = SEMModel(config).to(device)
 
-    result = train_steps(model, config, n_steps, batch_size, seq_len, device)
+    result = train_steps(
+        model, config, n_steps, batch_size, seq_len, device, trial=trial
+    )
 
     trial.set_user_attr("initial_loss", result.get("initial_loss", float("inf")))
     trial.set_user_attr("loss_reduction", result.get("loss_reduction", 0.0))
     trial.set_user_attr("steps_per_sec", result.get("steps_per_sec", 0.0))
     if "nan_step" in result:
         trial.set_user_attr("nan_step", result["nan_step"])
+    if "pruned_at" in result:
+        trial.set_user_attr("pruned_at", result["pruned_at"])
+        raise optuna.TrialPruned(f"Pruned at step {result['pruned_at']}")
 
     return result["final_loss"]
 

@@ -17,7 +17,7 @@ parser.add_argument("--flavor", type=str, default="a100x4")
 parser.add_argument("--timeout", type=int, default=3600)
 parser.add_argument("--hp-trials", type=int, default=50)
 parser.add_argument("--nas-trials", type=int, default=100)
-parser.add_argument("--n-steps", type=int, default=200)
+parser.add_argument("--n-steps", type=int, default=100)
 args = parser.parse_args()
 
 cmd = rf"""set -e
