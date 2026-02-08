@@ -81,5 +81,8 @@ wandb/
 outputs/
 *.onnx
 
+# Sweep databases (Optuna results)
+sweep/*.db
+
 # Diagnostic scripts (keep in repo for reproducibility)
 # diagnose_*.py, debug_*.py, analyze_*.py are committed intentionally
