@@ -11,7 +11,7 @@ import yaml
 class ModelConfig:
     hidden_dim: int = 256
     num_layers: int = 8
-    vocab_size: int = 32768
+    vocab_size: int = 50262
     max_seq_length: int = 2048
     model_version: str = "v55"
 

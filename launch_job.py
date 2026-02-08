@@ -4,8 +4,8 @@ import argparse
 import shlex
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--timeout", type=int, default=1800)
-parser.add_argument("--flavor", type=str, default="l40sx1")
+parser.add_argument("--timeout", type=int, default=21600)
+parser.add_argument("--flavor", type=str, default="a100x4")
 parser.add_argument("--config", type=str, default=None)
 parser.add_argument("--push-to-hub", type=str, default=None)
 parser.add_argument(
@@ -47,7 +47,7 @@ cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-python3 hf_train_lightning.py --no-compile """
+python3 hf_train_lightning.py --devices -1 --strategy ddp --precision bf16-mixed """
     + extra_args
 )
 

@@ -53,8 +53,26 @@ def main():
     parser.add_argument(
         "--precision",
         type=str,
-        default="32-true",
-        choices=["32-true"],
+        default="bf16-mixed",
+        choices=["32-true", "bf16-mixed", "16-mixed"],
+    )
+    parser.add_argument(
+        "--devices",
+        type=int,
+        default=-1,
+        help="Number of GPUs (-1 = auto-detect all available)",
+    )
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        default="auto",
+        choices=[
+            "auto",
+            "ddp",
+            "ddp_find_unused_parameters_true",
+            "fsdp",
+            "deepspeed_stage_2",
+        ],
     )
     parser.add_argument(
         "--overfit-batches",
@@ -115,6 +133,13 @@ def main():
     elif torch.cuda.is_available():
         logger.info("CUDA detected via torch.cuda.is_available()")
         device_type = "cuda"
+        n_gpus = torch.cuda.device_count()
+        logger.info(f"CUDA devices available: {n_gpus}")
+        for i in range(n_gpus):
+            props = torch.cuda.get_device_properties(i)
+            logger.info(
+                f"  GPU {i}: {props.name} ({props.total_memory / 1024**3:.1f} GB)"
+            )
 
     if device_type == "xpu":
         try:
@@ -148,6 +173,16 @@ def main():
             logger.warning(f"XPU VRAM probe failed: {exc}")
 
     model = SEMLightningModule(config)
+
+    if device_type == "cuda" and not args.no_compile:
+        try:
+            model = torch.compile(model, mode="reduce-overhead")
+            logger.info("torch.compile enabled (reduce-overhead)")
+        except Exception as e:
+            logger.warning(f"torch.compile failed: {e}")
+    elif args.no_compile:
+        logger.info("torch.compile disabled (--no-compile)")
+
     datamodule = SEMDataModule(config, tokenizer)
 
     # IPEX optimization for XPU (Intel Arc GPUs)
@@ -205,16 +240,44 @@ def main():
         else None
     )
 
+    # --- Resolve devices / strategy / precision per accelerator ---
+    if device_type == "xpu":
+        # XPU: single-device only, fp32, no DDP
+        effective_devices = 1
+        effective_strategy = strategy  # SingleDeviceStrategy set above
+        effective_precision = None if plugins else "32-true"
+    else:
+        # CUDA / CPU: honour CLI args
+        effective_devices = args.devices  # -1 = all GPUs
+        effective_strategy = strategy if strategy is not None else args.strategy
+        effective_precision = args.precision if not plugins else None
+
+    # Gradient accumulation: global_batch = micro_batch * devices * accum
+    num_devices = (
+        effective_devices
+        if effective_devices > 0
+        else (torch.cuda.device_count() if device_type == "cuda" else 1)
+    )
+    accumulate = max(
+        1,
+        config.training.batch_size // (config.training.micro_batch_size * num_devices),
+    )
+    logger.info(
+        f"Trainer config: devices={effective_devices}, strategy={effective_strategy}, "
+        f"precision={effective_precision}, accumulate_grad_batches={accumulate}"
+    )
+
     trainer = L.Trainer(
         max_steps=config.training.max_steps,
         accelerator=accelerator,
-        devices=1,
-        strategy=strategy if strategy is not None else "auto",
-        precision=args.precision if not plugins else None,
+        devices=effective_devices,
+        strategy=effective_strategy if effective_strategy is not None else "auto",
+        precision=effective_precision,
         plugins=plugins if plugins else None,
-        overfit_batches=args.overfit_batches,
-        accumulate_grad_batches=config.training.batch_size
-        // config.training.micro_batch_size,
+        overfit_batches=int(args.overfit_batches)
+        if args.overfit_batches >= 1
+        else args.overfit_batches,
+        accumulate_grad_batches=accumulate,
         gradient_clip_val=config.training.gradient_clip,
         logger=loggers,
         callbacks=callbacks,

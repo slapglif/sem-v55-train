@@ -19,7 +19,7 @@ model:
   hidden_dim: 256
   max_seq_length: 512
   num_layers: 8
-  vocab_size: 32768
+  vocab_size: 50262
 propagator:
   cayley_dt: 0.1
   cg_max_iter: 5

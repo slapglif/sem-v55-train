@@ -34,14 +34,19 @@ class FineWebEduStream:
         shuffle_buffer: int = 1000,
         dataset_name: str = "HuggingFaceFW/fineweb-edu",
         cache_dir: Optional[str] = None,
-        max_cache_docs: int = 100000,  # ~500MB cache
+        max_cache_docs: int = 100000,
+        shard_id: int = 0,
+        total_shards: int = 1,
     ):
         self.min_score = min_score
         self.split = split
         self.shuffle_buffer = shuffle_buffer
         self.dataset_name = dataset_name
-        # SEOP Fix 40: Local cache for streamed documents
-        self.cache_dir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "sem" / "fineweb"
+        self.shard_id = shard_id
+        self.total_shards = total_shards
+        self.cache_dir = (
+            Path(cache_dir) if cache_dir else Path.home() / ".cache" / "sem" / "fineweb"
+        )
         self.max_cache_docs = max_cache_docs
         self.cache_file = self.cache_dir / f"fineweb_edu_score{min_score}.jsonl"
 
@@ -52,13 +57,17 @@ class FineWebEduStream:
 
         # SEOP Fix 40: Check for local cache first
         # Look for any existing cache file (main or worker-specific)
-        cache_files = list(self.cache_dir.glob(f"fineweb_edu_score{self.min_score}*.jsonl"))
+        cache_files = list(
+            self.cache_dir.glob(f"fineweb_edu_score{self.min_score}*.jsonl")
+        )
         if cache_files:
             # Use the largest cache file (most complete)
             cache_file = max(cache_files, key=lambda f: f.stat().st_size)
             cache_size = cache_file.stat().st_size / 1e6
             if cache_size > 1.0:  # Only use if >1MB (not empty/partial)
-                logger.info(f"[DATA] Using cached data from {cache_file} ({cache_size:.1f}MB)")
+                logger.info(
+                    f"[DATA] Using cached data from {cache_file} ({cache_size:.1f}MB)"
+                )
                 with open(cache_file, "r") as f:
                     for line in f:
                         text = json.loads(line).get("text", "")
@@ -116,6 +125,11 @@ class FineWebEduStream:
             ds = ds.filter(lambda x: x.get("score", 0) >= self.min_score)
         t_filter_done = time.perf_counter()
 
+        # DDP sharding: each (rank, worker) pair gets a unique slice
+        if self.total_shards > 1:
+            logger.info(f"[DATA] Sharding: shard {self.shard_id}/{self.total_shards}")
+            ds = ds.shard(num_shards=self.total_shards, index=self.shard_id)
+
         # Shuffle within buffer
         t_shuffle = time.perf_counter()
         if self.shuffle_buffer > 0:
@@ -136,11 +150,15 @@ class FineWebEduStream:
         # SEOP Fix 40: Cache documents as we stream
         # Use worker-specific cache file to avoid race conditions
         import multiprocessing
+
         worker_info = torch.utils.data.get_worker_info()
         worker_id = worker_info.id if worker_info else 0
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        worker_cache = self.cache_dir / f"fineweb_edu_score{self.min_score}_worker{worker_id}.jsonl"
+        worker_cache = (
+            self.cache_dir
+            / f"fineweb_edu_score{self.min_score}_worker{worker_id}.jsonl"
+        )
 
         # Only cache from worker 0 (or main process) to avoid duplication
         should_cache = self.max_cache_docs > 0 and worker_id == 0
@@ -166,14 +184,18 @@ class FineWebEduStream:
                         cache_handle.write(json.dumps({"text": text}) + "\n")
                         cache_count += 1
                         if cache_count == self.max_cache_docs:
-                            logger.info(f"[DATA] Cache full ({cache_count} docs), subsequent docs not cached")
+                            logger.info(
+                                f"[DATA] Cache full ({cache_count} docs), subsequent docs not cached"
+                            )
                     yield text
         finally:
             if cache_handle:
                 cache_handle.close()
                 if worker_cache.exists():
                     cache_size = worker_cache.stat().st_size / 1e6
-                    logger.info(f"[DATA] Cached {cache_count} docs to {worker_cache} ({cache_size:.1f}MB)")
+                    logger.info(
+                        f"[DATA] Cached {cache_count} docs to {worker_cache} ({cache_size:.1f}MB)"
+                    )
 
 
 class SequencePacker:
@@ -313,10 +335,27 @@ class PackedStreamingDataset(IterableDataset):
         self.timing_enabled = timing_enabled
 
     def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+        import os
+
+        rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0)))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        worker_info = torch.utils.data.get_worker_info()
+        num_workers = worker_info.num_workers if worker_info else 1
+        worker_id = worker_info.id if worker_info else 0
+
+        total_shards = world_size * num_workers
+        shard_id = rank * num_workers + worker_id
+        logger.info(
+            f"[DDP] rank={rank}/{world_size}, worker={worker_id}/{num_workers}, "
+            f"shard={shard_id}/{total_shards}"
+        )
+
         stream = FineWebEduStream(
             min_score=self.min_score,
             shuffle_buffer=self.shuffle_buffer,
             dataset_name=self.dataset_name,
+            shard_id=shard_id,
+            total_shards=total_shards,
         )
         packer = SequencePacker(
             self.tokenizer, self.seq_len, timing_enabled=self.timing_enabled
@@ -324,7 +363,10 @@ class PackedStreamingDataset(IterableDataset):
         yield from packer.pack(iter(stream))
 
     def create_dataloader(
-        self, batch_size: int, num_workers: int = 4, pin_memory: bool = True,
+        self,
+        batch_size: int,
+        num_workers: int = 4,
+        pin_memory: bool = True,
         prefetch_factor: int = 4,
     ) -> DataLoader:
         """Create a DataLoader for this dataset.

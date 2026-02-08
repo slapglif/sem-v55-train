@@ -1,11 +1,11 @@
-# SEM V5.5 "Lean Crystal" - A100 80GB Maximum Throughput
+# SEM V5.5 "Lean Crystal" - 4xA100 80GB Maximum Throughput
 # Sweep-optimized params from 4xA100 cloud sweep (2026-02-08)
-# bf16 AMP + gradient checkpointing, large batch
+# bf16-mixed precision, DDP across 4 GPUs
 
 model:
   hidden_dim: 256
   num_layers: 8
-  vocab_size: 32768
+  vocab_size: 50262
   max_seq_length: 2048
 
 encoder:
@@ -61,9 +61,9 @@ sampler:
   temperature_last: false
 
 training:
-  batch_size: 512
-  micro_batch_size: 32
-  gradient_checkpointing: false  # Disabled - tensor mismatch bug
+  batch_size: 2048
+  micro_batch_size: 64
+  gradient_checkpointing: false
   dtype: float32
   learning_rate: 8.6e-4
   weight_decay: 0.002
@@ -77,7 +77,7 @@ training:
   label_smoothing: 0.058
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 8
+  num_workers: 4
   shuffle_buffer_size: 50000
   scheduler_type: "wsd"
   stable_steps: 0
