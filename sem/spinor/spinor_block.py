@@ -128,7 +128,7 @@ class SpinorBlock(nn.Module):
         training objective.
         """
 
-        W = torch.complex(self.weight_real, self.weight_imag)  # [N, B, B]
+        W = safe_complex(self.weight_real, self.weight_imag)  # [N, B, B]
         W_dag = W.conj().transpose(-2, -1)
         WdW = torch.bmm(W_dag, W)  # [N, B, B]
         I = torch.eye(self.block_size, device=W.device, dtype=W.dtype).unsqueeze(0)

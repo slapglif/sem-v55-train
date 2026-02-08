@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class SEMLightningModule(L.LightningModule):
     def __init__(self, config: Any):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["config"])
         self.config = config
         self.model = SEMModel(config)
 

@@ -129,7 +129,7 @@ class HealthMonitor:
                 )
 
             # Unitarity through propagator (skip if propagator is disabled)
-            if getattr(model, 'propagator_enabled', True):
+            if getattr(model, "propagator_enabled", True):
                 psi_before_prop = psi.clone()
                 psi_after_prop = model.propagator(psi)
                 report.unitarity_dev = unitarity_deviation(
@@ -218,7 +218,9 @@ class HealthMonitor:
                 dim=-1, keepdim=True
             )
             scale = torch.sqrt((norm_in + 1e-12) / (norm_rot + 1e-12))
-            psi_rot = torch.complex(psi_rot_r * scale, psi_rot_i * scale)
+            psi_rot = torch.complex(
+                (psi_rot_r * scale).float(), (psi_rot_i * scale).float()
+            )
             rhs = torch.matmul(psi_rot, A_minus.T)
 
             # Get actual output

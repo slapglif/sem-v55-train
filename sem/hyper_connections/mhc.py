@@ -26,6 +26,7 @@ from typing import Optional
 import math
 
 from .sinkhorn import sinkhorn_log, sinkhorn_log_complex
+from sem.utils.complex_ops import safe_complex
 
 
 class MHCResidual(nn.Module):
@@ -107,7 +108,7 @@ class MHCResidual(nn.Module):
                 tau=self.mhc_tau,
             )
             # Return complex tensor
-            h_res = torch.complex(H_real, H_imag)
+            h_res = safe_complex(H_real, H_imag)
         else:
             h_res = sinkhorn_log(
                 self.H_res_logits,
@@ -121,7 +122,7 @@ class MHCResidual(nn.Module):
         if self.complex_mode:
             beta_real = torch.softmax(self.beta_logits, dim=-1)
             beta_imag = torch.softmax(self.beta_logits_imag, dim=-1)
-            beta = torch.complex(beta_real, beta_imag)
+            beta = safe_complex(beta_real, beta_imag)
         else:
             beta = torch.softmax(self.beta_logits, dim=-1)
         return beta
@@ -273,7 +274,7 @@ class SimpleMHC(nn.Module):
                 num_iters=self.mhc_num_iters,
                 tau=self.mhc_tau,
             )
-            h_res = torch.complex(H_real, H_imag)
+            h_res = safe_complex(H_real, H_imag)
         else:
             h_res = sinkhorn_log(
                 self.H_res_logits,
@@ -360,7 +361,7 @@ def mhc_residual(
         # stream-mixing matrix. The functional API follows SimpleMHC's convention:
         # partition channels into S streams (D must be divisible by S), apply
         # H_res on the stream axis, then reshape back.
-        h_res = torch.complex(H_real, H_imag)
+        h_res = safe_complex(H_real, H_imag)
         s = h_res.shape[-1]
         b, t, d = x_real.shape
         if d % s != 0:

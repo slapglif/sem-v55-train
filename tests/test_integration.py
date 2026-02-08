@@ -254,7 +254,7 @@ class TestConfig:
         config = SEMConfig()
         assert config.model.hidden_dim == 256
         assert config.model.num_layers == 8
-        assert config.model.vocab_size == 32768
+        assert config.model.vocab_size == 50262
 
     def test_yaml_config(self):
         """Config should load from YAML."""

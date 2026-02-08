@@ -19,6 +19,7 @@ from torch import Tensor
 
 from .hash_mapping import NgramHashMapping
 from .multi_head_embedding import MultiHeadEmbedding
+from ..utils.complex_ops import safe_complex
 
 
 @dataclass
@@ -271,7 +272,7 @@ class Engram(nn.Module):
         """
         if not self.phase_preserving:
             # Legacy: add to real part only (breaks Re/Im symmetry).
-            return torch.complex(psi.real + engram_out, psi.imag)
+            return safe_complex(psi.real + engram_out, psi.imag)
 
         # Phase-preserving: scale magnitude along psi direction.
         # psi_out = psi * (1 + engram_out / (|psi| + eps))

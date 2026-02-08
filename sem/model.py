@@ -23,6 +23,7 @@ from .propagator.cayley_soliton import CayleySolitonStack
 from .sampler.born_collapse import BornCollapseSampler
 from .sampler.logits_processors import build_processor_chain
 from .utils.complex_layernorm import ComplexRMSNorm
+from .utils.complex_ops import safe_complex
 
 # Optional imports
 # NOTE: basedpyright treats ALL_CAPS as constants; assign once.
@@ -363,7 +364,7 @@ class ComplexMamba3LayerV8(nn.Module):
             with torch.no_grad():
                 # SEOP Fix 57: Compute H_eff on the normalized delta.
                 H_eff_real = self.approximate_hamiltonian(branch_out)
-                H_eff = torch.complex(H_eff_real, torch.zeros_like(H_eff_real))
+                H_eff = safe_complex(H_eff_real, torch.zeros_like(H_eff_real))
 
         if self.use_hybrid_automata:
             assert H_eff is not None
@@ -627,7 +628,7 @@ class SEMModel(nn.Module):
                 # Engram expects [B, L, D] real features — use magnitude as proxy
                 engram_out = self.engram_layers[str(i)](psi.abs(), token_ids)
                 # Add engram contribution to real part
-                psi = torch.complex(psi.real + engram_out, psi.imag)
+                psi = safe_complex(psi.real + engram_out, psi.imag)
 
             psi = mamba_layer(psi)  # [B, S, D] complex64
 
@@ -861,6 +862,6 @@ class SEMModel(nn.Module):
         for i, mamba_layer in enumerate(self.mamba_layers):
             if self.use_engram and str(i) in self.engram_layers:
                 engram_out = self.engram_layers[str(i)](psi.abs(), token_ids)
-                psi = torch.complex(psi.real + engram_out, psi.imag)
+                psi = safe_complex(psi.real + engram_out, psi.imag)
             psi = mamba_layer(psi)
         return psi

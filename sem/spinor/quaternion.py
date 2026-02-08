@@ -23,6 +23,7 @@ import torch.nn as nn
 from torch import Tensor
 from typing import Tuple
 import math
+from ..utils.complex_ops import safe_complex
 
 
 class Quaternion:
@@ -68,7 +69,7 @@ class Quaternion:
         Returns:
             [...] complex tensor (w + xi)
         """
-        return torch.complex(self.w, self.x)
+        return safe_complex(self.w, self.x)
 
     def __mul__(self, other: "Quaternion") -> "Quaternion":
         """Quaternion multiplication via Hamilton product.
@@ -309,7 +310,7 @@ class QuaternionicEscape(nn.Module):
         # Imaginary-axis attenuation (equivalent to quaternionic j-axis rotation
         # followed by projection back to the complex plane).
         cos_angle = torch.cos(self.escape_angle)
-        psi_attenuated = torch.complex(psi.real, psi.imag * cos_angle)
+        psi_attenuated = safe_complex(psi.real, psi.imag * cos_angle)
 
         # Renormalize to preserve L2 norm per token
         norm_before = torch.linalg.norm(psi, dim=-1, keepdim=True)
