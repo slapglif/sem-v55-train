@@ -66,6 +66,10 @@ class SEMLightningModule(L.LightningModule):
 
             for m in self.model.mamba_layers:
                 make_checkpointed(m)
+            # Also checkpoint the propagator — Chebyshev KPM (16 iterations)
+            # holds many intermediate tensors in the autograd graph
+            if hasattr(self.model, "propagator"):
+                make_checkpointed(self.model.propagator)
         else:
             logger.info(
                 "Gradient checkpointing DISABLED (config.training.gradient_checkpointing=False)"
