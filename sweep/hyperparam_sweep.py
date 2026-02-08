@@ -311,6 +311,9 @@ def objective(
 
 
 def main():
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+
     parser = argparse.ArgumentParser(description="SEM V5.5 Hyperparameter Sweep")
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument("--n-steps", type=int, default=100)
