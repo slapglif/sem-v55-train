@@ -92,15 +92,12 @@ def make_config(trial: optuna.Trial) -> SEMConfig:
     )
     laplacian_sparsity = trial.suggest_int("laplacian_sparsity", 3, 7)
     pit_gamma = _round_sig(trial.suggest_float("pit_gamma", 0.01, 2.0))
-    use_chebyshev_kpm = trial.suggest_categorical("use_chebyshev_kpm", [True, False])
-    if use_chebyshev_kpm:
-        chebyshev_degree = trial.suggest_categorical(
-            "chebyshev_degree", [6, 8, 12, 16, 20, 24]
-        )
-        direct_solve = False
-    else:
-        chebyshev_degree = PropagatorConfig().chebyshev_degree
-        direct_solve = True
+    # KPM always enabled — replaces CG solver entirely (O(D) vs O(D³))
+    use_chebyshev_kpm = True
+    chebyshev_degree = trial.suggest_categorical(
+        "chebyshev_degree", [6, 8, 12, 16, 20, 24]
+    )
+    direct_solve = False
 
     # Sampler
     temperature = _round_sig(trial.suggest_float("temperature", 0.5, 2.0))
@@ -378,10 +375,7 @@ def main():
     block_size = best.params.get("block_size", 1)
     num_blocks = hidden_dim // block_size if isinstance(hidden_dim, int) else "?"
 
-    use_chebyshev_kpm = best.params.get("use_chebyshev_kpm", None)
-    direct_solve = (
-        (not use_chebyshev_kpm) if isinstance(use_chebyshev_kpm, bool) else "?"
-    )
+    direct_solve = False
 
     print(f"\n  Architecture:")
     for k in ["hidden_dim", "num_layers"]:
@@ -419,10 +413,10 @@ def main():
         "nonlinear_alpha",
         "laplacian_sparsity",
         "pit_gamma",
-        "use_chebyshev_kpm",
         "chebyshev_degree",
     ]:
         print(f"    {k}: {best.params.get(k, '?')}")
+    print(f"    use_chebyshev_kpm: True (fixed)")
     print(f"    direct_solve: {direct_solve}")
 
     print(f"\n  Sampler:")
