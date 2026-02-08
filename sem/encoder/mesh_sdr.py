@@ -139,6 +139,15 @@ class MESHEncoder(nn.Module):
         # Keeps Re in embedding space so weight-tied output projection works correctly.
         # Mamba provides implicit positional encoding via sequential scan.
         if self.simple_mode:
+            # SEOP Fix 52: Simple mode — Re(z) = embedding, Im(z) = learned projection
+            # Keeps Re in embedding space so weight-tied output projection works correctly.
+            # Mamba provides implicit positional encoding via sequential scan.
+
+            # Note: For strict weight tying, we want output magnitude to match input magnitude.
+            # self.embedding.weight is init with std=1/sqrt(D).
+            # self.imag_proj is init with gain=0.3.
+            # So |z|² = |x|² + |y|² ≈ 1 + 0.09 ≈ 1.09. This is safe.
+
             x_imag = self.imag_proj(x)
             return safe_complex(x, x_imag)
 

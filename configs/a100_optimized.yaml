@@ -18,6 +18,7 @@ encoder:
   sinkhorn_auto_epsilon_scale: 0.04
   soft_sparse: true
   soft_sparse_temp: 0.1
+  simple_mode: true # SEOP Fix: Bypass Sinkhorn entirely for speed (direct embedding)
 
 spinor:
   block_size: 8
@@ -63,7 +64,7 @@ sampler:
 
 training:
   batch_size: 2048
-  micro_batch_size: 32
+  micro_batch_size: 128 # SEOP Fix: Reduce accumulation steps (16 -> 4)
   gradient_checkpointing: true
   dtype: float32
   learning_rate: 8.6e-4
@@ -84,7 +85,7 @@ training:
   stable_steps: 0
   decay_steps: 10000
   lr_min_ratio: 0.1
-  log_interval: 1
+  log_interval: 10 # SEOP Fix: Reduce logging frequency to save .item() syncs
   health_check_interval: 500
   checkpoint_interval: 200
   keep_checkpoints: 5
@@ -96,10 +97,10 @@ training:
 v8:
   use_lindblad: true
   use_hybrid_automata: false
-  use_quaternionic: true
+  use_quaternionic: false # SEOP Fix: Disable SVD-based escape
   use_mhc: true
   mhc_streams: 8
-  mhc_num_iters: 3
+  mhc_num_iters: 1 # SEOP Fix: Reduce from 3 to 1 to save Sinkhorn passes
   mhc_tau: 0.031
   lindblad_gamma: 0.007
   num_lindblad_ops: 4

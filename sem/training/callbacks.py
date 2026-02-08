@@ -40,6 +40,9 @@ class SEMConsoleLogger(Callback):
         loss_metric = trainer.callback_metrics.get("train/loss")
         if loss_metric is None:
             return
+
+        # SEOP Fix: Defer .item() sync until we strictly need it for logging
+        # (This is already guarded by step % log_interval, so it's fine)
         loss = (
             loss_metric.item()
             if isinstance(loss_metric, torch.Tensor)
