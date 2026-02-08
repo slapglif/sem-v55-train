@@ -64,10 +64,10 @@ class SEMLightningModule(L.LightningModule):
 
                 module.forward = checkpointed_forward
 
-            for m in self.model.mamba_layers:
-                make_checkpointed(m)
-            # Also checkpoint the propagator — Chebyshev KPM (16 iterations)
-            # holds many intermediate tensors in the autograd graph
+            # Only checkpoint the propagator — Chebyshev KPM (16 iterations)
+            # holds many intermediate tensors in the autograd graph.
+            # Mamba layers are O(N) and relatively cheap, so we avoid the
+            # recomputation overhead for them (SEOP Fix: remove Mamba checkpointing).
             if hasattr(self.model, "propagator"):
                 make_checkpointed(self.model.propagator)
         else:
@@ -98,7 +98,13 @@ class SEMLightningModule(L.LightningModule):
         warmup_steps = self.config.training.warmup_steps
         step = self.trainer.global_step
         if warmup_steps > 0 and step <= warmup_steps:
-            alpha = step / warmup_steps
+            raw_alpha = step / warmup_steps
+            # SEOP Perf: Skip propagator entirely during early warmup (<10%)
+            # to save 100% of propagator compute when contribution is negligible.
+            if raw_alpha < 0.1:
+                alpha = 0.0
+            else:
+                alpha = raw_alpha
             self.model.set_propagator_alpha(alpha)
         elif not self.model.propagator_enabled:
             self.model.set_propagator_alpha(1.0)

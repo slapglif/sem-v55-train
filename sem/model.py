@@ -512,9 +512,11 @@ class SEMModel(nn.Module):
             )
 
         # 4. Cayley-Soliton Propagator Stack
+        # SEOP Fix: Allow decoupled propagator depth (e.g. 1 layer vs model's 8)
+        prop_layers = getattr(c.propagator, "num_layers", c.model.num_layers)
         self.propagator = CayleySolitonStack(
             dim=c.model.hidden_dim,
-            num_layers=c.model.num_layers,
+            num_layers=prop_layers,
             dt=c.propagator.cayley_dt,
             nonlinear_alpha=c.propagator.nonlinear_alpha,
             cg_max_iter=c.propagator.cg_max_iter,

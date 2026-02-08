@@ -147,7 +147,7 @@ def chebyshev_kpm_solve(
     rhs_r: Tensor,
     rhs_i: Tensor,
     coeffs: Tensor,
-    lambda_max: float,
+    lambda_max: float | Tensor,
 ) -> tuple[Tensor, Tensor]:
     r"""Apply KPM Chebyshev expansion to approximate (I + iαH)^{−1} · rhs.
 
@@ -183,7 +183,14 @@ def chebyshev_kpm_solve(
         approximate resolvent applied to the RHS.
     """
     k = coeffs.shape[0]
-    lmax = max(lambda_max, 1e-8)
+    if isinstance(lambda_max, torch.Tensor):
+        # SEOP Fix: Handle tensor lambda_max to avoid GPU-CPU sync
+        lmax = torch.maximum(
+            lambda_max,
+            torch.tensor(1e-8, device=lambda_max.device, dtype=lambda_max.dtype),
+        )
+    else:
+        lmax = max(lambda_max, 1e-8)
     scale = 2.0 / lmax
 
     # Ĥ·v = (2/λ_max)·H·v − v  (rescale eigenvalues to [-1, 1])

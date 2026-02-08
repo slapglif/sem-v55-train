@@ -158,9 +158,9 @@ class GraphLaplacianHamiltonian(nn.Module):
             # doesn't change), only weights change per forward pass.
             w_sym = torch.cat([self._cached_w, self._cached_w])
             idx = self._sparse_idx_sym
-            self._cached_sparse_A = torch.sparse_coo_tensor(
-                idx, w_sym, (D, D)
-            ).coalesce().to_sparse_csr()
+            self._cached_sparse_A = (
+                torch.sparse_coo_tensor(idx, w_sym, (D, D)).coalesce().to_sparse_csr()
+            )
 
     def clear_cache(self):
         """Clear cached weights."""
@@ -350,17 +350,75 @@ class MultiScaleHamiltonian(nn.Module):
         # Learnable scale mixing weights
         self.scale_weights = nn.Parameter(torch.ones(num_scales) / num_scales)
         self._cached_scale_weights = None
+        # SEOP Fix: Fuse multi-scale Hamiltonian into single sparse matrix
+        self._cached_fused_A: Tensor | None = None
+        self._cached_fused_degree: Tensor | None = None
 
     def cache_weights(self):
-        """Cache scale mixing weights and child Hamiltonian weights."""
+        """Cache scale mixing weights and fuse Hamiltonian for fast matvec."""
         self._cached_scale_weights = torch.softmax(self.scale_weights, dim=0)
+        weights = self._cached_scale_weights
+
+        # Cache children first
         for scale in self.scales:
             if hasattr(scale, "cache_weights"):
                 scale.cache_weights()
 
+        # Fuse A and degree
+        device = weights.device
+        dim = self.scales[0].dim
+        fused_degree = torch.zeros(dim, device=device)
+
+        # Detect mode (dense vs sparse) from first scale
+        is_dense = self.scales[0]._cached_dense_A is not None
+
+        if is_dense:
+            fused_A = torch.zeros(dim, dim, device=device, dtype=weights.dtype)
+            for w, scale in zip(weights, self.scales):
+                if scale._cached_dense_A is not None:
+                    fused_A += w * scale._cached_dense_A
+                if scale._cached_degree is not None:
+                    fused_degree += w * scale._cached_degree
+            self._cached_fused_A = fused_A
+        else:
+            # Sparse mode: Concatenate COO indices/values and coalesce once
+            all_indices = []
+            all_values = []
+
+            for w, scale in zip(weights, self.scales):
+                if scale._cached_degree is not None:
+                    fused_degree += w * scale._cached_degree
+
+                # Reconstruct weighted COO from cached components
+                # scale._cached_w is softplus(weights)
+                # scale._sparse_idx_sym is pre-built symmetric indices
+                if scale._cached_w is not None and hasattr(scale, "_sparse_idx_sym"):
+                    idx = scale._sparse_idx_sym
+                    # Weights are repeated for symmetry in _sparse_idx_sym construction
+                    # (cat([w, w]))
+                    w_val = torch.cat([scale._cached_w, scale._cached_w]) * w
+
+                    all_indices.append(idx)
+                    all_values.append(w_val)
+
+            if all_indices:
+                fused_indices = torch.cat(all_indices, dim=1)
+                fused_values = torch.cat(all_values)
+                self._cached_fused_A = (
+                    torch.sparse_coo_tensor(fused_indices, fused_values, (dim, dim))
+                    .coalesce()
+                    .to_sparse_csr()
+                )
+            else:
+                self._cached_fused_A = None
+
+        self._cached_fused_degree = fused_degree
+
     def clear_cache(self):
         """Clear all caches."""
         self._cached_scale_weights = None
+        self._cached_fused_A = None
+        self._cached_fused_degree = None
         for scale in self.scales:
             if hasattr(scale, "clear_cache"):
                 scale.clear_cache()
@@ -404,18 +462,39 @@ class MultiScaleHamiltonian(nn.Module):
 
     def matvec_real_fused(self, vr: Tensor, vi: Tensor) -> tuple[Tensor, Tensor]:
         """Multi-scale H @ v for fused real tensors."""
-        # SEOP Fix 23: Fuse real/imag passes per scale to avoid duplicate sparse.mm.
-        weights = (
-            self._cached_scale_weights
-            if self._cached_scale_weights is not None
-            else torch.softmax(self.scale_weights, dim=0)
-        )
-        terms_r, terms_i = [], []
-        for w, scale in zip(weights, self.scales):
-            Hvr, Hvi = scale.matvec_real_fused(vr, vi)
-            terms_r.append(w * Hvr)
-            terms_i.append(w * Hvi)
-        return torch.stack(terms_r).sum(dim=0), torch.stack(terms_i).sum(dim=0)
+        # SEOP Fix: Use fused sparse matrix for O(1) matvec kernel launch
+        if self._cached_fused_A is None:
+            self.cache_weights()
+
+        A = self._cached_fused_A
+        degree = self._cached_fused_degree
+
+        if degree is None:
+            # Fallback if cache_weights failed or empty
+            return vr, vi
+
+        D = degree.shape[0]
+        batch_shape = vr.shape[:-1]
+
+        # Reshape and fuse real/imag for single matmul
+        vr_flat = vr.reshape(-1, D)
+        vi_flat = vi.reshape(-1, D)
+        v_combined = torch.cat([vr_flat, vi_flat], dim=0)
+
+        if A is not None:
+            if A.layout == torch.sparse_csr:
+                Av_combined = torch.sparse.mm(A, v_combined.t()).t()
+            else:
+                Av_combined = v_combined @ A.t()
+        else:
+            Av_combined = torch.zeros_like(v_combined)
+
+        Avr_flat, Avi_flat = Av_combined.split(vr_flat.shape[0], dim=0)
+
+        Avr = Avr_flat.reshape(*batch_shape, D)
+        Avi = Avi_flat.reshape(*batch_shape, D)
+
+        return degree * vr - Avr, degree * vi - Avi
 
     def matvec(self, v: Tensor) -> Tensor:
         """Multi-scale H @ v for complex tensors."""

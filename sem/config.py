@@ -47,6 +47,7 @@ class SpinorConfig:
 @dataclass
 class PropagatorConfig:
     cayley_dt: float = 0.02
+    num_layers: int = 1  # SEOP Fix: Decoupled from model depth (was 8). 1 layer is sufficient for diffusion.
     cg_max_iter: int = 5  # 5 iterations sufficient for training; use 20 for inference
     cg_tol: float = 1e-6
     nonlinear_alpha: float = 0.12

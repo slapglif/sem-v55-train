@@ -225,17 +225,24 @@ class CayleySolitonPropagator(nn.Module):
 
             if self.use_chebyshev_kpm:
                 # Update λ_max from current Hamiltonian weights (Gershgorin bound)
-                _diag = self.hamiltonian.get_diagonal().real
-                _lmax = float(2.0 * _diag.max().item())
-                _lmax = max(_lmax, 1e-8)
-                self._cheby_lambda_max.fill_(_lmax)
+                # SEOP Fix: Cache lambda_max to avoid GPU-CPU sync every step
+                # Only update every 10 steps (weights change slowly)
+                if self._training_step % 10 == 0 or self._training_step < 5:
+                    _diag = self.hamiltonian.get_diagonal().real
+                    # Keep as tensor on GPU, avoid .item() sync
+                    # _diag.max() returns a 0-dim tensor
+                    _lmax = 2.0 * _diag.max()
+                    self._cheby_lambda_max.copy_(_lmax)
+
+                # Use cached tensor value
+                _lmax_tensor = self._cheby_lambda_max
 
                 out_r, out_i = chebyshev_kpm_solve(
                     matvec_fn=self.hamiltonian.matvec_real_fused,
                     rhs_r=rhs_r,
                     rhs_i=rhs_i,
                     coeffs=self.cheby_coeffs,
-                    lambda_max=_lmax,
+                    lambda_max=_lmax_tensor,
                 )
 
                 psi_out = torch.view_as_complex(
