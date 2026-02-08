@@ -64,4 +64,22 @@ ENV/
 
 # OMC/Agent
 .omc/
+.claude/
+.letta/
+.sisyphus/
 nul
+
+# Lean 4 build artifacts
+lean4/.lake/
+lean4/lake-manifest.json
+
+# Downloaded packages / tarballs
+*.tgz
+
+# Training outputs & wandb
+wandb/
+outputs/
+*.onnx
+
+# Diagnostic scripts (keep in repo for reproducibility)
+# diagnose_*.py, debug_*.py, analyze_*.py are committed intentionally

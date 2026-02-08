@@ -1,0 +1,107 @@
+# SEM V5.5 RTX 3060 — SEOP Fix 71c (Gate + Scale Fix)
+# SEOP: Solve silicon (VRAM), computational, and learning bottlenecks
+#
+# VRAM ceiling tests WITH ComplexAdamW:
+#   hidden=768  batch=4: 136M params, ~2.6 GB (47%)
+#   hidden=1024 batch=4: 138M params, ~3.5 GB (64%)
+#   hidden=1408 batch=4: 208M params, 4.84 GB (88%)
+#
+# Fix 68: Fixed gradient collapse — buffer scales, relaxed chi2 gate, pre-sampler scale
+# Fix 69: FAILED — 4x batch via accumulation. 4x slower per step.
+# Fix 70: Maximize model capacity
+#   hidden=1408: FAILED — grad_norm spikes to 71.4
+#   hidden=1024, lr=5e-3, clip=3.0: FAILED — grad_norm spikes to 101.7
+#   Fix 70c: hidden=1024, lr=3e-3, clip=1.0 — tighter control
+# Fix 71: SEOP Distribution Audit findings:
+#   71a: Gate threshold -6.0 → 0.0 (63% passthrough vs 0.25% — SSM branch was dead)
+#   71b: pre_sampler_scale 1.0 → sqrt(D)=32 (contextual logits now override Zipf bias)
+#   71c: Conservative config for validation (lr=3e-3, clip=1.0, batch=4, seq=256)
+#   Goal: Isolate gate+scale effect before pushing silicon utilization
+# AMP OFF (complex tensors incompatible with bf16)
+
+model:
+  model_version: "v55"
+  hidden_dim: 1024
+  num_layers: 8
+  vocab_size: 50262
+  max_seq_length: 256     # SEOP Fix 71c: keep 256 for validation
+
+encoder:
+  simple_mode: true
+  sdr_sparsity: 16
+  sdr_candidates: 128
+  sinkhorn_epsilon: 0.05
+  sinkhorn_max_iter: 20
+  sinkhorn_tol: 1.0e-3
+  soft_sparse: true
+  soft_sparse_temp: 1.0
+
+spinor:
+  block_size: 4
+  num_blocks: 24
+  state_dim: 64
+  mimo_groups: 8
+  d_conv: 4
+
+propagator:
+  cayley_dt: 0.02
+  cg_max_iter: 10
+  cg_tol: 2.0e-3
+  nonlinear_alpha: 0.25
+  laplacian_sparsity: 4
+  lazy_cg: true
+  lazy_cg_tol: 2.0e-3
+
+quantizer:
+  codebook_size: 256
+  group_size: 2
+  fisher_ema_decay: 0.999
+  outlier_percentile: 0.01
+  dead_code_threshold: 50
+
+sampler:
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+training:
+  batch_size: 4            # SEOP Fix 71c: conservative for validation
+  micro_batch_size: 4
+  gradient_checkpointing: true
+  dtype: float32
+  learning_rate: 5.0e-3    # SEOP Fix 71d: per axiom analysis (D skip + open gate enable higher lr)
+  no_amp: true            # Complex tensors don't support bf16; AMP incompatible
+  no_compile: true
+  encoder_lr_scale: 0.3   # SEOP Fix 59: was 0.1, embedding barely moved vs sampler
+  weight_decay: 0.01
+  warmup_steps: 100        # SEOP Fix 71c: longer warmup — scale=32 needs careful warmup
+  max_steps: 10000
+  gradient_clip: 3.0       # SEOP Fix 71c revert: 5.0 caused instability with Fix 72, 3.0 proven stable
+  unitary_lambda: 0.0
+  dataset_name: "HuggingFaceFW/fineweb-edu"
+  tokenizer_path: "tokenizer/"
+  num_workers: 4
+  shuffle_buffer_size: 10000
+  scheduler_type: "cosine"
+  stable_steps: 0
+  decay_steps: 10000
+  lr_min_ratio: 0.1
+  label_smoothing: 0.0
+  log_interval: 5
+  health_check_interval: 50
+  checkpoint_interval: 2000
+  keep_checkpoints: 3
+  wandb_project: "sem-v8-optimized"
+  wandb_enabled: false
+
+curriculum:
+  enabled: false
+
+distillation:
+  enabled: false
+
+v8:
+  use_lindblad: false
+  use_hybrid_automata: false
+  use_quaternionic: false
+  use_mhc: false
