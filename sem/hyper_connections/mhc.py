@@ -100,22 +100,12 @@ class MHCResidual(nn.Module):
 
     def get_h_res(self) -> Tensor:
         """Compute doubly stochastic H_res via Sinkhorn projection."""
-        if self.complex_mode:
-            H_real, H_imag = sinkhorn_log_complex(
-                self.H_res_logits,
-                self.H_res_logits_imag,
-                num_iters=self.mhc_num_iters,
-                tau=self.mhc_tau,
-            )
-            # Return complex tensor
-            h_res = safe_complex(H_real, H_imag)
-        else:
-            h_res = sinkhorn_log(
-                self.H_res_logits,
-                num_iters=self.mhc_num_iters,
-                tau=self.mhc_tau,
-            )
-        return h_res
+        # SEOP Fix 73: project real logits only for both real and complex modes
+        return sinkhorn_log(
+            self.H_res_logits,
+            num_iters=self.mhc_num_iters,
+            tau=self.mhc_tau,
+        )
 
     def get_beta(self) -> Tensor:
         """Compute output routing weights (softmax for normalization)."""
@@ -139,7 +129,7 @@ class MHCResidual(nn.Module):
             Updated residual stream [B, ..., S, D] or [B, ..., D]
         """
         # Get doubly stochastic mixing matrix
-        H_res = self.get_h_res()  # [S, S]
+        H_res = self.get_h_res().to(dtype=residual.dtype)  # [S, S]
 
         # Get output routing weights
         beta = self.get_beta()  # [S]
@@ -267,20 +257,14 @@ class SimpleMHC(nn.Module):
         Returns:
             [B, T, D]
         """
-        if self.complex_mode:
-            H_real, H_imag = sinkhorn_log_complex(
-                self.H_res_logits,
-                self.H_res_logits_imag,
-                num_iters=self.mhc_num_iters,
-                tau=self.mhc_tau,
-            )
-            h_res = safe_complex(H_real, H_imag)
-        else:
-            h_res = sinkhorn_log(
-                self.H_res_logits,
-                num_iters=self.mhc_num_iters,
-                tau=self.mhc_tau,
-            )
+        # SEOP Fix 73: Always project real logits only — same real H for both
+        # Re/Im channels. This preserves diagonal-dominant contrast that
+        # magnitude projection destroyed.
+        h_res = sinkhorn_log(
+            self.H_res_logits,
+            num_iters=self.mhc_num_iters,
+            tau=self.mhc_tau,
+        )
 
         # Partition channels into streams: [B, T, D] -> [B, T, S, Ds]
         # Then apply stream mixing H:[S,S] to the stream axis.
@@ -288,7 +272,9 @@ class SimpleMHC(nn.Module):
         if d != self.dim:
             raise ValueError(f"Expected residual last-dim={self.dim}, got {d}")
         residual_s = residual.view(b, t, self.num_streams, self._stream_dim)
-        mixed_s = torch.einsum("ij,btjd->btid", h_res, residual_s)
+        mixed_s = torch.einsum(
+            "ij,btjd->btid", h_res.to(dtype=residual.dtype), residual_s
+        )
         mixed = mixed_s.reshape(b, t, d)
 
         # Branch injection (per-channel-partition gain). beta in (0, 2) with beta=1 at init.
@@ -307,7 +293,7 @@ def mhc_residual(
     branch_output: Tensor,
     H_res_logits: Tensor,
     H_res_logits_imag: Optional[Tensor] = None,
-    mhc_num_iters: int = 10,
+    mhc_num_iters: int = 20,
     mhc_tau: float = 0.05,
     complex_mode: bool = True,
 ) -> Tensor:
@@ -315,12 +301,14 @@ def mhc_residual(
 
     This is the minimal interface for SEM V8.0 integration.
 
+    SEOP Fix 73: Always projects real logits only (H_res_logits_imag is
+    accepted for backward compatibility but ignored).
+
     Args:
         x: Input residual [B, T, D]
         branch_output: Branch function output [B, T, D]
         H_res_logits: Learnable mixing matrix logits [1, 1] or [S, S]
-        H_res_logits_imag: Optional imaginary logits for complex mode.
-            If None, zeros are used (symmetric/real-only Sinkhorn).
+        H_res_logits_imag: Ignored (kept for backward compatibility).
         mhc_num_iters: Sinkhorn iterations
         mhc_tau: Sinkhorn temperature
         complex_mode: Handle complex tensors
@@ -334,56 +322,21 @@ def mhc_residual(
         >>> branch = torch.randn_like(x)
         >>> y = mhc_residual(x, branch, H_logits)
     """
-    if complex_mode:
-        # S=1 fast path: Sinkhorn on [1,1] is always [[1.0]], skip entirely
-        if H_res_logits.shape[-1] == 1:
-            return x + branch_output
+    if H_res_logits.shape[-1] == 1:
+        return x + branch_output
 
-        x_real = x.real
-        x_imag = x.imag
-        branch_real = branch_output.real
-        branch_imag = branch_output.imag
+    h_res = sinkhorn_log(H_res_logits, num_iters=mhc_num_iters, tau=mhc_tau)
 
-        imag_logits = (
-            H_res_logits_imag
-            if H_res_logits_imag is not None
-            else torch.zeros_like(H_res_logits)
-        )
-
-        H_real, H_imag = sinkhorn_log_complex(
-            H_res_logits,
-            imag_logits,
-            num_iters=mhc_num_iters,
-            tau=mhc_tau,
-        )
-
-        # SEOP (state-shape audit): when S>1, the residual mixing is a full
-        # stream-mixing matrix. The functional API follows SimpleMHC's convention:
-        # partition channels into S streams (D must be divisible by S), apply
-        # H_res on the stream axis, then reshape back.
-        h_res = safe_complex(H_real, H_imag)
-        s = h_res.shape[-1]
-        b, t, d = x_real.shape
-        if d % s != 0:
-            raise ValueError(f"x last-dim ({d}) must be divisible by num_streams ({s})")
-        ds = d // s
-
-        x_s = x.view(b, t, s, ds)
-        mixed_s = torch.einsum("ij,btjd->btid", h_res, x_s)
-        mixed = mixed_s.reshape(b, t, d)
-        return mixed + branch_output
+    s = h_res.shape[-1]
+    if x.is_complex():
+        b, t, d = x.real.shape
     else:
-        if H_res_logits.shape[-1] == 1:
-            return x + branch_output
-        h_res = sinkhorn_log(H_res_logits, num_iters=mhc_num_iters, tau=mhc_tau)
-        # SEOP (state-shape audit): match the multi-stream mixing behavior of
-        # SimpleMHC when H is [S,S] and x is [B,T,D].
-        s = h_res.shape[-1]
         b, t, d = x.shape
-        if d % s != 0:
-            raise ValueError(f"x last-dim ({d}) must be divisible by num_streams ({s})")
-        ds = d // s
-        x_s = x.view(b, t, s, ds)
-        mixed_s = torch.einsum("ij,btjd->btid", h_res, x_s)
-        mixed = mixed_s.reshape(b, t, d)
-        return mixed + branch_output
+    if d % s != 0:
+        raise ValueError(f"x last-dim ({d}) must be divisible by num_streams ({s})")
+    ds = d // s
+
+    x_s = x.view(b, t, s, ds)
+    mixed_s = torch.einsum("ij,btjd->btid", h_res.to(dtype=x.dtype), x_s)
+    mixed = mixed_s.reshape(b, t, d)
+    return mixed + branch_output

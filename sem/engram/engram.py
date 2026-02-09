@@ -336,7 +336,7 @@ class Engram(nn.Module):
         # [SEOP] Scalar per-channel gates are intentionally non-adaptive (position-independent).
         # Per-token gates would require computing attention/MLP over hash embeddings, adding
         # O(T*D) cost and extra memory traffic; the scalar gate is a coarse, fast on/off switch.
-        gates = torch.sigmoid(self.gate_logits)  # [hc_mult]
+        gates = torch.softmax(self.gate_logits, dim=0)  # [hc_mult], sum=1
 
         # Expand value to [B, L, hc_mult, D] and apply gates
         value_expanded = value.unsqueeze(2).expand(

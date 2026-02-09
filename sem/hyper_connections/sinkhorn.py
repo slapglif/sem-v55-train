@@ -35,7 +35,7 @@ from typing import Optional
 
 def sinkhorn_log(
     logits: Tensor,
-    num_iters: int = 10,
+    num_iters: int = 20,
     tau: float = 0.05,
     eps: float = 1e-12,
 ) -> Tensor:
@@ -81,43 +81,38 @@ def sinkhorn_log(
 def sinkhorn_log_complex(
     logits_real: Tensor,
     logits_imag: Tensor,
-    num_iters: int = 10,
+    num_iters: int = 20,
     tau: float = 0.05,
     eps: float = 1e-12,
 ) -> tuple[Tensor, Tensor]:
     """Complex-valued variant of Sinkhorn for complex residual streams.
 
-    Applies Sinkhorn to magnitude, preserves phase. Ensures doubly stochastic
-    property holds for the magnitude while keeping phase information.
+    SEOP Fix 73: Run Sinkhorn on real logits only, apply the SAME real doubly-
+    stochastic H to both Re and Im channels. The previous implementation
+    projected magnitude (sqrt(re² + im²)) which destroyed sign ordering:
+    with init_h diag=0, off=-0.25, magnitude maps both to positive values,
+    erasing the contrast that keeps H near identity.
+
+    By running on logits_real directly: exp(-0.25/0.05) = exp(-5) ≈ 0.007
+    off-diag vs exp(0) = 1 on-diag → identity-like H as intended.
+
+    The imag logits parameter is accepted for backward compatibility but
+    is no longer used in the projection.
 
     Args:
         logits_real: Real part of logits [N, N] or [..., N, N]
-        logits_imag: Imaginary part of logits [N, N] or [..., N, N]
+        logits_imag: Imaginary part of logits [N, N] or [..., N, N] (unused)
         num_iters: Number of Sinkhorn iterations
         tau: Temperature
         eps: Numerical stability epsilon
 
     Returns:
-        (H_real, H_imag): Doubly stochastic complex matrix
-        where sqrt(H_real^2 + H_imag^2).sum(dim=-1) ≈ 1
+        (H_real, H_imag): Doubly stochastic matrix applied to both channels.
+        H_imag is zeros (the same real H is used for both Re/Im mixing).
     """
-    # Compute magnitude (add eps for stability)
-    logits_mag = torch.sqrt(logits_real**2 + logits_imag**2 + eps)
+    # Project real logits onto Birkhoff Polytope — same H for both channels
+    H = sinkhorn_log(logits_real, num_iters=num_iters, tau=tau, eps=eps)
 
-    # Project magnitude onto Birkhoff Polytope
-    H_mag = sinkhorn_log(logits_mag, num_iters=num_iters, tau=tau, eps=eps)
-
-    # Direct normalization instead of atan2 → cos/sin roundtrip.
-    # atan2(0,0) backward computes 0/0 = NaN; torch.where can't mask it
-    # because 0 * NaN = NaN in IEEE 754.
-    safe_mag = logits_mag.clamp(min=1e-6)
-    unit_real = logits_real / safe_mag
-    unit_imag = logits_imag / safe_mag
-    mag_is_small = logits_mag.detach() < 1e-4
-    unit_real = torch.where(mag_is_small, torch.ones_like(unit_real), unit_real)
-    unit_imag = torch.where(mag_is_small, torch.zeros_like(unit_imag), unit_imag)
-
-    H_real = H_mag * unit_real
-    H_imag = H_mag * unit_imag
-
-    return H_real, H_imag
+    # Return (H, 0) so callers using safe_complex(H_real, H_imag) get a real
+    # doubly-stochastic matrix that mixes Re and Im channels identically.
+    return H, torch.zeros_like(H)

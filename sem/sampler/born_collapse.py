@@ -46,20 +46,32 @@ class BornCollapseSampler(nn.Module):
         self._top_k = top_k
         self._top_p = top_p
 
-        # logits = W_r @ Re(psi) + W_i @ Im(psi) + bias
+        # logits = W_r @ Re(psi') + W_i @ Im(psi') + bias
+        # where psi' = psi * exp(i*theta) is a learnable phase rotation
         self.proj_real = nn.Linear(hidden_dim, vocab_size, bias=False)
         self.proj_imag = nn.Linear(hidden_dim, vocab_size, bias=False)
         self.output_bias = nn.Parameter(torch.zeros(vocab_size))
 
+        # Learnable phase rotation: compensates global-phase ambiguity when
+        # weight tying constrains proj_real to share encoder embedding weights
+        self.phase_theta = nn.Parameter(torch.zeros(1))
+
     def compute_logits(self, psi: Tensor) -> Tensor:
         """Project complex wavefunction to vocabulary logits.
+
+        Applies learnable phase rotation before projection:
+            psi' = psi * exp(i * theta)
 
         Args:
             psi: [B, S, D] complex64 wavefunction
         Returns:
             logits: [B, S, V] float32
         """
-        return self.proj_real(psi.real) + self.proj_imag(psi.imag) + self.output_bias
+        cos_t = torch.cos(self.phase_theta)
+        sin_t = torch.sin(self.phase_theta)
+        psi_r = psi.real * cos_t - psi.imag * sin_t
+        psi_i = psi.real * sin_t + psi.imag * cos_t
+        return self.proj_real(psi_r) + self.proj_imag(psi_i) + self.output_bias
 
     def _legacy_filter(
         self, logits: Tensor, temperature: float, top_k: int, top_p: float

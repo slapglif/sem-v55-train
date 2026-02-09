@@ -627,10 +627,8 @@ class SEMModel(nn.Module):
         for i, mamba_layer in enumerate(self.mamba_layers):
             # Apply Engram if configured for this layer
             if self.use_engram and str(i) in self.engram_layers:
-                # Engram expects [B, L, D] real features — use magnitude as proxy
                 engram_out = self.engram_layers[str(i)](psi.abs(), token_ids)
-                # Add engram contribution to real part
-                psi = safe_complex(psi.real + engram_out, psi.imag)
+                psi = self.engram_layers[str(i)].inject_into_complex(psi, engram_out)
 
             psi = mamba_layer(psi)  # [B, S, D] complex64
 
@@ -864,6 +862,6 @@ class SEMModel(nn.Module):
         for i, mamba_layer in enumerate(self.mamba_layers):
             if self.use_engram and str(i) in self.engram_layers:
                 engram_out = self.engram_layers[str(i)](psi.abs(), token_ids)
-                psi = safe_complex(psi.real + engram_out, psi.imag)
+                psi = self.engram_layers[str(i)].inject_into_complex(psi, engram_out)
             psi = mamba_layer(psi)
         return psi
