@@ -448,19 +448,35 @@ class SEMTrainer:
         )
 
     def _check_nan_grads(self) -> bool:
-        for name, param in self.model.named_parameters():
-            if param.grad is not None:
-                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                    logger.error(f"NaN/Inf gradient detected in: {name}")
-                    return True
-        return False
+        # PERF: Batched check — 1 GPU sync instead of ~482 (241 params × 2 checks)
+        grads = [
+            p.grad.reshape(-1) for p in self.model.parameters() if p.grad is not None
+        ]
+        if not grads:
+            return False
+        flat = torch.cat(grads)
+        has_bad = bool(torch.isnan(flat).any() | torch.isinf(flat).any())
+        if has_bad:
+            # Slow path: identify which parameter has the issue (only on failure)
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        logger.error(f"NaN/Inf gradient detected in: {name}")
+                        break
+        return has_bad
 
     def _check_nan_params(self) -> bool:
-        for name, param in self.model.named_parameters():
-            if torch.isnan(param.data).any() or torch.isinf(param.data).any():
-                logger.error(f"NaN/Inf parameter value detected in: {name}")
-                return True
-        return False
+        # PERF: Batched check — 1 GPU sync instead of ~482 (241 params × 2 checks)
+        params = [p.data.reshape(-1) for p in self.model.parameters()]
+        flat = torch.cat(params)
+        has_bad = bool(torch.isnan(flat).any() | torch.isinf(flat).any())
+        if has_bad:
+            # Slow path: identify which parameter has the issue (only on failure)
+            for name, param in self.model.named_parameters():
+                if torch.isnan(param.data).any() or torch.isinf(param.data).any():
+                    logger.error(f"NaN/Inf parameter value detected in: {name}")
+                    break
+        return has_bad
 
     def _reduce_lr_on_nan(self, reason: str):
         old_lr = self.optimizer.param_groups[0]["lr"]
@@ -539,6 +555,9 @@ class SEMTrainer:
             try:
                 t_step_start = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
+                step_loss_tensor = torch.tensor(0.0, device=self.device)
+                step_ud_tensor = torch.tensor(0.0, device=self.device)
+
                 # Gradient accumulation loop
                 for accum_idx in range(accum_steps):
                     current_phase = "batch_load"
@@ -611,26 +630,11 @@ class SEMTrainer:
                         self.device.type, sync=c.timing_enabled
                     )
 
-                    # NaN/Inf detection after backward
-                    loss_val = loss.item()
-                    if math.isnan(loss_val) or math.isinf(loss_val):
-                        logger.error(
-                            f"NaN/Inf loss={loss_val} at step {self.global_step} "
-                            f"micro={accum_idx}"
-                        )
-                        self._reduce_lr_on_nan("loss is NaN/Inf")
-                        self.optimizer.zero_grad()
-                        nan_detected = True
-                        break
-                    if self._check_nan_grads():
-                        self._reduce_lr_on_nan("gradient NaN/Inf")
-                        self.optimizer.zero_grad()
-                        nan_detected = True
-                        break
-
-                    step_loss += loss_val / accum_steps
+                    # Accumulate on GPU (single .item() after loop)
+                    loss_detached = loss.detach()
+                    step_loss_tensor += loss_detached / accum_steps
                     if "unitary_divergence" in output:
-                        step_unitary_divergence += (
+                        step_ud_tensor += (
                             output["unitary_divergence"].detach() / accum_steps
                         )
                     micro_step += 1
@@ -660,8 +664,22 @@ class SEMTrainer:
                                 else:
                                     prop_agg[k] = prop_agg.get(k, 0) + v
 
-                if isinstance(step_unitary_divergence, torch.Tensor):
-                    step_unitary_divergence = step_unitary_divergence.item()
+                if bool(torch.isnan(step_loss_tensor) | torch.isinf(step_loss_tensor)):
+                    step_loss_val = step_loss_tensor.item()
+                    logger.error(
+                        f"NaN/Inf loss={step_loss_val} at step {self.global_step}"
+                    )
+                    self._reduce_lr_on_nan("loss is NaN/Inf")
+                    self.optimizer.zero_grad()
+                    nan_detected = True
+
+                if not nan_detected and self._check_nan_grads():
+                    self._reduce_lr_on_nan("gradient NaN/Inf")
+                    self.optimizer.zero_grad()
+                    nan_detected = True
+
+                step_loss = step_loss_tensor.item()
+                step_unitary_divergence = float(step_ud_tensor)
 
                 if nan_detected:
                     self.global_step += 1
@@ -671,14 +689,16 @@ class SEMTrainer:
                 t_clip_start = _sync_and_time(self.device.type, sync=c.timing_enabled)
                 if self._grad_scaler is not None:
                     self._grad_scaler.unscale_(self.optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(
+                grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), c.gradient_clip
-                ).item()
+                )
+                grad_norm = float(grad_norm_tensor)
                 t_clip_end = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
                 current_phase = "fisher_update"
                 t_fisher_start = time.perf_counter()
-                self.quantizer.update_fisher(self.model)
+                if self.global_step % 10 == 0:
+                    self.quantizer.update_fisher(self.model)
                 t_fisher_end = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
                 if self._check_nan_params():
@@ -696,7 +716,6 @@ class SEMTrainer:
                     self.optimizer.step()
                 self.optimizer.zero_grad()
                 self.scheduler.step()
-                # Trigger cosine decay when warmup completes
                 if self.global_step == self.config.training.warmup_steps:
                     self.scheduler.begin_decay()
                     logger.info(

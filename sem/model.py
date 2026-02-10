@@ -625,6 +625,14 @@ class SEMModel(nn.Module):
 
         return output
 
+    def invalidate_caches(self):
+        """Invalidate all per-step caches (call after optimizer.step())."""
+        if self._use_v8_layers:
+            for layer in self.mamba_layers:
+                lindblad = getattr(layer, "lindblad", None)
+                if lindblad is not None:
+                    lindblad.invalidate_cache()
+
     def get_diagnostics(self) -> dict[str, Any]:
         """Get diagnostic information about V8 components.
 

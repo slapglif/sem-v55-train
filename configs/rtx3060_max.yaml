@@ -1,7 +1,7 @@
-# SEM V5.5 RTX 3060 6GB - Fast Convergence
-# Reduced model for fast iteration on 6GB VRAM
-# Gradient accumulation for smooth loss curve
-# V8 features enabled (sweep-proven combo: Lindblad + Quaternionic + mHC)
+# SEM V5.5 RTX 3060 12GB - Fast Convergence
+# Tuned for sub-1-hour convergence on RTX 3060
+# V8 features DISABLED (overhead without convergence benefit at this scale)
+# SEOP Fix 86: Warmup/LR/scheduler overhaul from convergence audit
 
 model:
   hidden_dim: 256
@@ -15,25 +15,25 @@ training:
   low_vram_mode: true
   gradient_checkpointing: true
   dtype: float32
-  learning_rate: 3.0e-4  # SEOP Fix 85: Sqrt-scaled LR for 12K effective batch
+  learning_rate: 1.0e-3  # SEOP Fix 86: 3.3x increase (was 3e-4, too conservative)
   no_amp: true
   no_compile: true
-  encoder_lr_scale: 0.016
+  encoder_lr_scale: 0.1  # SEOP Fix 86: 6x increase (was 0.016, encoder was frozen)
   weight_decay: 0.1
-  warmup_steps: 500  # SEOP Fix 85: Gradual warmup (propagator warmup = 2x = 1000)
+  warmup_steps: 100  # SEOP Fix 86: Was 500 (1.8hr warmup > 1hr budget = never trains)
   max_steps: 10000
   gradient_clip: 1.0
   unitary_lambda: 0.006
   unitary_clamp_min: 0.01
   unitary_clamp_max: 6.9
-  label_smoothing: 0.058
+  label_smoothing: 0.01  # SEOP Fix 86: Reduced from 0.058 (was masking convergence signal)
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
   num_workers: 8
   prefetch_factor: 4
   pin_memory: true
   shuffle_buffer_size: 10000
-  scheduler_type: "cosine"
+  scheduler_type: "wsd"  # SEOP Fix 86: Warmup-Stable-Decay (was cosine)
   stable_steps: 0
   decay_steps: 10000
   lr_min_ratio: 0.1
@@ -44,21 +44,24 @@ training:
   wandb_project: "sem-v8-optimized"
   wandb_enabled: false
 
+# SEOP Fix 86: Override spinor defaults (were oversized for 256-dim model)
+spinor:
+  block_size: 16  # was 8 (default)
+  num_blocks: 16  # was 32 (default) — halved to match hidden_dim
+  state_dim: 32   # was 64 (default) — halved for speed
+  mimo_groups: 4  # was 8 (default) — halved for speed
+  d_conv: 4
+  memory_horizon_ratio: 0.0
+
 v8:
-  use_lindblad: true
+  use_lindblad: false       # SEOP Fix 86: Disabled (30-50% overhead, no convergence benefit)
   use_hybrid_automata: false
-  use_quaternionic: true
-  use_mhc: true
-  mhc_streams: 4
-  mhc_num_iters: 5
-  mhc_tau: 0.031
-  lindblad_gamma: 0.007
-  num_lindblad_ops: 2
-  curvature_threshold: 0.64
-  condition_threshold: 62.0
+  use_quaternionic: false   # SEOP Fix 86: Disabled
+  use_mhc: false            # SEOP Fix 86: Disabled
 
 encoder:
-  soft_sparse: true  # SEOP Fix 85: Re-enable soft_sparse with adaptive learnable temp
+  soft_sparse: true
+  sinkhorn_max_iter: 30  # SEOP Fix 86: Was 90 (default), 3x reduction
 
 curriculum:
   enabled: false
