@@ -72,10 +72,10 @@ training:
   no_amp: true             # Complex tensors don't support bf16
   no_compile: true
   encoder_lr_scale: 0.016
-  weight_decay: 0.002
+  weight_decay: 0.1
   warmup_steps: 100
   max_steps: 10000
-  gradient_clip: 17.0
+  gradient_clip: 1.0
   unitary_lambda: 0.006
   unitary_clamp_min: 0.01
   unitary_clamp_max: 6.9

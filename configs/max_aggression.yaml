@@ -71,11 +71,11 @@ training:
 
   # Optimization — sweep-derived
   learning_rate: 8.6e-4
-  weight_decay: 0.002
+  weight_decay: 0.1
   encoder_lr_scale: 0.016
   warmup_steps: 2000
   max_steps: 100000
-  gradient_clip: 17.0
+  gradient_clip: 1.0
   unitary_lambda: 0.006
   unitary_clamp_min: 0.01
   unitary_clamp_max: 6.9

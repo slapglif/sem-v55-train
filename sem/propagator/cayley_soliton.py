@@ -361,9 +361,12 @@ class CayleySolitonPropagator(nn.Module):
                 Ax0 = a_minus_matvec_wrapped(x0)
                 residual = Ax0 - rhs_real_block
                 rel_residual = residual.norm() / (rhs_real_block.norm() + 1e-12)
-                skip_cg = (
-                    rel_residual.item() < self.lazy_cg_tol
-                )  # Intentional GPU sync for lazy CG gate
+                if torch.compiler.is_compiling():
+                    # During torch.compile: always run CG (no graph break)
+                    skip_cg = False
+                else:
+                    # Eager mode: use lazy CG gate with GPU→CPU sync
+                    skip_cg = rel_residual.item() < self.lazy_cg_tol
                 if _t:
                     self._timing_stats.setdefault("lazy_gate", []).append(
                         time.perf_counter() - t_gate

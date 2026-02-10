@@ -116,13 +116,17 @@ class TrainingConfig:
     # Existing fields
     batch_size: int = 32
     learning_rate: float = 8.6e-4
-    weight_decay: float = 0.002
+    weight_decay: float = (
+        0.1  # Mamba consensus: 0.1 (Gu & Dao 2023, NVIDIA Megatron, ArchScale)
+    )
     encoder_lr_scale: float = (
         0.016  # SEOP Fix 41: Encoder LR = base_lr * this (balance gradient flow)
     )
-    warmup_steps: int = 2000  # Changed from 1000
+    warmup_steps: int = 2000
     max_steps: int = 100000
-    gradient_clip: float = 17.0  # SEOP Fix 35: raised from 1.0 — too aggressive, clips useful NLL gradients
+    gradient_clip: float = (
+        1.0  # Mamba consensus: 1.0 (universal across all SSM implementations)
+    )
     dtype: str = "complex64"
 
     # New fields
@@ -181,9 +185,9 @@ class CurriculumConfig:
     enabled: bool = True
     stages: list = field(
         default_factory=lambda: [
-            {"min_score": 2, "seq_len": 512, "min_steps": 20000},
-            {"min_score": 3, "seq_len": 1024, "min_steps": 30000},
-            {"min_score": 3, "seq_len": 2048, "min_steps": 50000},
+            {"min_score": 2, "seq_len": 512, "min_steps": 5000},
+            {"min_score": 2, "seq_len": 1024, "min_steps": 10000},
+            {"min_score": 3, "seq_len": 2048, "min_steps": 15000},
         ]
     )
     transition_check_interval: int = 500

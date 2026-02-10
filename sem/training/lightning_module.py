@@ -188,21 +188,25 @@ class SEMLightningModule(L.LightningModule):
                     logger.error(f"CRITICAL ERROR: NaN/Inf parameter {name}")
 
     def configure_optimizers(self):
-        # SEOP Fix 41: Per-layer LR scaling to balance gradient flow
-        # Encoder gradients are ~1000x larger than downstream layers
         base_lr = self.config.training.learning_rate
         encoder_lr_scale = getattr(self.config.training, "encoder_lr_scale", 0.01)
+        wd = self.config.training.weight_decay
 
-        # Separate parameter groups with different LRs
+        # 3-group optimizer (matches trainer.py — SEOP Fix 48 + Mamba best practice)
         encoder_params = []
+        ssm_nodecay_params = []
         other_params = []
 
         for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                if name.startswith("encoder"):
-                    encoder_params.append(param)
-                else:
-                    other_params.append(param)
+            if not param.requires_grad:
+                continue
+            if name.startswith("encoder"):
+                encoder_params.append(param)
+            elif "A_log" in name or "log_A_mag" in name or ".D" in name:
+                # SSM discrete parameters: no weight decay (Mamba paper, Appendix E)
+                ssm_nodecay_params.append(param)
+            else:
+                other_params.append(param)
 
         param_groups = [
             {
@@ -210,20 +214,25 @@ class SEMLightningModule(L.LightningModule):
                 "lr": base_lr * encoder_lr_scale,
                 "name": "encoder",
             },
+            {
+                "params": ssm_nodecay_params,
+                "lr": base_lr,
+                "weight_decay": 0.0,
+                "name": "ssm_nodecay",
+            },
             {"params": other_params, "lr": base_lr, "name": "other"},
         ]
+        param_groups = [g for g in param_groups if len(g["params"]) > 0]
 
         logger.info(
-            f"SEOP Fix 41: Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}"
-        )
-        logger.info(
-            f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}"
+            f"Optimizer groups: encoder={len(encoder_params)}, "
+            f"ssm_nodecay={len(ssm_nodecay_params)}, other={len(other_params)}"
         )
 
         optimizer = ComplexAdamW(
             param_groups,
             lr=base_lr,
-            weight_decay=self.config.training.weight_decay,
+            weight_decay=wd,
             temperature=0,
         )
 

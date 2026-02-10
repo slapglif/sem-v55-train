@@ -128,15 +128,19 @@ class SEMTrainer:
         elif self.device.type == "xpu":
             logger.info("torch.compile disabled for XPU (eager mode)")
 
-        # Optimizer with per-layer LR scaling (SEOP Fix 48)
+        # Optimizer with per-group LR + weight decay (SEOP Fix 48 + Mamba best practice)
         base_lr = config.training.learning_rate
         encoder_lr_scale = getattr(config.training, "encoder_lr_scale", 0.01)
         encoder_params = []
+        ssm_nodecay_params = []
         other_params = []
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 if name.startswith("encoder"):
                     encoder_params.append(param)
+                elif "A_log" in name or "log_A_mag" in name or ".D" in name:
+                    # SSM discrete parameters: no weight decay (Mamba paper, Appendix E)
+                    ssm_nodecay_params.append(param)
                 else:
                     other_params.append(param)
         param_groups = [
@@ -145,13 +149,19 @@ class SEMTrainer:
                 "lr": base_lr * encoder_lr_scale,
                 "name": "encoder",
             },
+            {
+                "params": ssm_nodecay_params,
+                "lr": base_lr,
+                "weight_decay": 0.0,
+                "name": "ssm_nodecay",
+            },
             {"params": other_params, "lr": base_lr, "name": "other"},
         ]
         logger.info(
             f"Encoder LR={base_lr * encoder_lr_scale:.2e}, Other LR={base_lr:.2e}"
         )
         logger.info(
-            f"  Encoder params: {len(encoder_params)}, Other params: {len(other_params)}"
+            f"  Encoder params: {len(encoder_params)}, SSM no-decay: {len(ssm_nodecay_params)}, Other: {len(other_params)}"
         )
         self.optimizer = ComplexAdamW(
             param_groups,
@@ -609,7 +619,7 @@ class SEMTrainer:
                     step_loss += loss_val / accum_steps
                     if "unitary_divergence" in output:
                         step_unitary_divergence += (
-                            output["unitary_divergence"].item() / accum_steps
+                            output["unitary_divergence"].detach() / accum_steps
                         )
                     micro_step += 1
 
@@ -637,6 +647,9 @@ class SEMTrainer:
                                     prop_agg.setdefault(k, []).extend(v)
                                 else:
                                     prop_agg[k] = prop_agg.get(k, 0) + v
+
+                if isinstance(step_unitary_divergence, torch.Tensor):
+                    step_unitary_divergence = step_unitary_divergence.item()
 
                 if nan_detected:
                     self.global_step += 1

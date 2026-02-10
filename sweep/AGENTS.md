@@ -47,3 +47,21 @@ uv run python sweep/nas_search.py --n-trials 100 --n-steps 100 --device cpu
 
 - `optuna` - sweep/NAS framework
 - `torch` - model + training loop
+
+## Required MCP Tools
+
+All agents working in this directory MUST use these MCP tools during multi-stage workflows:
+
+### Sequential Thinking
+Use `sequential-thinking` MCP for any multi-step reasoning, planning, or debugging:
+- Break complex problems into explicit sequential steps
+- Revise thinking when new information emerges
+- Branch to explore alternative approaches
+- Invoke at the START of any non-trivial task
+
+### Context7
+Use Context7 MCP tools to resolve library documentation before writing code:
+- `context7_resolve-library-id` — Find the correct library identifier
+- `context7_query-docs` — Query up-to-date documentation for that library
+
+Only skip these tools when the task is trivially simple and would not benefit from structured reasoning or documentation lookup.
