@@ -11,6 +11,7 @@ from typing import Optional, Iterator, Tuple
 from pathlib import Path
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -96,17 +97,21 @@ class FineWebEduStream:
         last_err = None
         for attempt in range(5):
             try:
-                ds = load_dataset(
-                    self.dataset_name,
-                    split=self.split,
-                    streaming=True,
-                    token=hf_token,
-                )
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        load_dataset,
+                        self.dataset_name,
+                        split=self.split,
+                        streaming=True,
+                        token=hf_token,
+                    )
+                    ds = future.result(timeout=60)
                 break
             except Exception as e:
                 last_err = e
+                timeout_msg = " (timeout)" if isinstance(e, FuturesTimeoutError) else ""
                 logger.error(
-                    f"[DATA] load_dataset failed (attempt {attempt + 1}/5): {e}"
+                    f"[DATA] load_dataset failed{timeout_msg} (attempt {attempt + 1}/5): {e}"
                 )
                 if attempt < 4:
                     time.sleep(5 * (attempt + 1))

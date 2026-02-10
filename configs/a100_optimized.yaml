@@ -64,18 +64,19 @@ sampler:
 
 training:
   batch_size: 2048
-  micro_batch_size: 128 # SEOP Fix: Reduce accumulation steps (16 -> 4)
+  micro_batch_size: 32 # SEOP Fix: Revert to 32 to fix OOM (128 was too aggressive)
   gradient_checkpointing: true
   dtype: float32
   learning_rate: 8.6e-4
   weight_decay: 0.002
   encoder_lr_scale: 0.016
-  warmup_steps: 500 # SEOP Fix: Reduced warmup to reach peak LR faster
+  warmup_steps: 500
   max_steps: 100000
   gradient_clip: 17.0
   unitary_lambda: 0.006
   unitary_clamp_min: 0.01
   unitary_clamp_max: 6.9
+  low_vram_mode: false # Keep false for speed, only enable if 32 fails
   label_smoothing: 0.058
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"

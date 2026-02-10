@@ -21,6 +21,7 @@ from ..utils.metrics import (
     sparsity_ratio,
 )
 from sem.spinor.complex_ops import complex_mul_real
+from ..utils.complex_ops import safe_complex
 
 
 @dataclass
@@ -218,7 +219,7 @@ class HealthMonitor:
                 dim=-1, keepdim=True
             )
             scale = torch.sqrt((norm_in + 1e-12) / (norm_rot + 1e-12))
-            psi_rot = torch.complex(
+            psi_rot = safe_complex(
                 (psi_rot_r * scale).float(), (psi_rot_i * scale).float()
             )
             rhs = torch.matmul(psi_rot, A_minus.T)

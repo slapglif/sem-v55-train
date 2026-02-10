@@ -3,6 +3,7 @@
 import pytest
 import time
 import torch
+from sem.utils.complex_ops import safe_complex
 
 
 def test_jackson_kernel_properties():
@@ -56,7 +57,7 @@ def test_kpm_solve_matches_direct():
 
     # Random RHS
     psi = torch.randn(B, S, D, dtype=torch.complex64)
-    rhs = torch.complex(torch.randn(B, S, D), torch.randn(B, S, D))
+    rhs = safe_complex(torch.randn(B, S, D), torch.randn(B, S, D))
     rhs_r, rhs_i = rhs.real, rhs.imag
 
     # Direct solve reference
@@ -80,13 +81,15 @@ def test_kpm_solve_matches_direct():
         coeffs=coeffs,
         lambda_max=lmax,
     )
-    x_kpm = torch.complex(out_r, out_i)
+    x_kpm = safe_complex(out_r, out_i)
 
     ham.clear_cache()
 
     # Relative error should be < 5% (KPM is approximate)
     rel_error = (x_kpm - x_direct).norm() / (x_direct.norm() + 1e-12)
-    assert rel_error.item() < 0.05, f"KPM relative error {rel_error.item():.4f} exceeds 5%"
+    assert rel_error.item() < 0.05, (
+        f"KPM relative error {rel_error.item():.4f} exceeds 5%"
+    )
 
 
 def test_kpm_unitarity():
@@ -131,11 +134,13 @@ def test_kpm_unitarity():
     ham.clear_cache()
 
     # Compare norms: input vs output (should be close for unitary transform)
-    norm_in = (psi_r ** 2 + psi_i ** 2).sum(dim=-1)
-    norm_out = (out_r ** 2 + out_i ** 2).sum(dim=-1)
+    norm_in = (psi_r**2 + psi_i**2).sum(dim=-1)
+    norm_out = (out_r**2 + out_i**2).sum(dim=-1)
     rel_norm_change = ((norm_out - norm_in).abs() / (norm_in + 1e-12)).mean()
 
-    assert rel_norm_change.item() < 0.10, f"Norm change {rel_norm_change.item():.4f} exceeds 10%"
+    assert rel_norm_change.item() < 0.10, (
+        f"Norm change {rel_norm_change.item():.4f} exceeds 10%"
+    )
 
 
 @pytest.mark.slow
@@ -219,7 +224,7 @@ def test_learnable_coeffs_gradient():
         lambda_max=lmax,
     )
 
-    loss = (out_r ** 2 + out_i ** 2).sum()
+    loss = (out_r**2 + out_i**2).sum()
     loss.backward()
 
     ham.clear_cache()

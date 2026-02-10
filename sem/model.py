@@ -150,21 +150,11 @@ try:
 
         def sinkhorn_log_complex(*args, **kwargs):
             H0_real, H0_imag = _orig_sinkhorn_log_complex(*args, **kwargs)
-            mag = torch.sqrt(H0_real * H0_real + H0_imag * H0_imag)
-            mag_n = _ds_postnorm(mag)
-
-            # Avoid extreme rescaling when magnitude is near-zero.
-            eps_mag = 1e-12
-            scale = torch.where(mag > eps_mag, mag_n / mag, torch.zeros_like(mag_n))
-            scale = torch.clamp(scale, max=1e3)
-
-            Hn_real = H0_real * scale
-            Hn_imag = H0_imag * scale
-
+            # After SEOP Fix 73, H0_imag is zeros. Postnorm H_real directly
+            # (not its magnitude) to preserve sign, and pass H0_imag through.
+            Hn_real = _ds_postnorm(H0_real)
             # Straight-through: forward uses post-norm, backward uses original.
-            return H0_real + (Hn_real - H0_real).detach(), H0_imag + (
-                Hn_imag - H0_imag
-            ).detach()
+            return H0_real + (Hn_real - H0_real).detach(), H0_imag
 
         _sinkhorn_mod.sinkhorn_log = sinkhorn_log
         _sinkhorn_mod.sinkhorn_log_complex = sinkhorn_log_complex
@@ -702,8 +692,6 @@ class SEMModel(nn.Module):
                         continue
                     if unitary_lambda != 0.0:
                         loss = loss + unitary_lambda * hybrid.compute_unitarity_loss()
-                    else:
-                        loss = loss + hybrid.compute_unitarity_loss()
 
             output["loss"] = loss
 

@@ -275,9 +275,14 @@ class Engram(nn.Module):
             return safe_complex(psi.real + engram_out, psi.imag)
 
         # Phase-preserving: scale magnitude along psi direction.
-        # psi_out = psi * (1 + engram_out / (|psi| + eps))
-        mag = psi.abs().clamp(min=1e-8)
-        scale = 1.0 + engram_out / mag
+        # SEOP Fix 77: Use per-position RMS denominator instead of per-dimension |psi|.
+        # Per-dim |psi| ≈ 0.065-0.092 for D=128-256, so eps=1e-8 gives routine 2-10×
+        # amplification. RMS across the feature dim is O(1) after normalization layers,
+        # preventing noise amplification while preserving directional modulation.
+        rms = torch.sqrt(
+            (psi.real * psi.real + psi.imag * psi.imag).mean(dim=-1, keepdim=True)
+        ).clamp(min=0.01)
+        scale = 1.0 + engram_out / rms
         return psi * scale
 
     def forward(self, hidden_states: Tensor, input_ids: Tensor) -> Tensor:

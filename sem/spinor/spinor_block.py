@@ -209,11 +209,12 @@ class SpinorGate(nn.Module):
     sigmoid (logistic-probit approximation to Gaussian CDF).
     """
 
-    def __init__(self, hidden_dim: int, block_size: int = 8):
+    def __init__(self, hidden_dim: int, block_size: int = 8, num_gate_levels: int = 8):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.block_size = block_size
         self.num_blocks = hidden_dim // block_size
+        self.num_gate_levels = num_gate_levels
 
         # Anti-Hermitian generator (shared with the Cayley computation)
         A_real = torch.randn(self.num_blocks, block_size, block_size) * 0.02
@@ -246,65 +247,78 @@ class SpinorGate(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """Apply gated unitary spinor transformation via Cayley(g * A).
 
+        Discretizes the gate to K levels and precomputes K*N Cayley maps
+        instead of B*S*N, then gathers per-token. Straight-through estimator
+        preserves gate gradients through the quantization.
+
         Args:
             x: [B, S, D] complex64
         Returns:
             [B, S, D] complex64
         """
         B, S, D = x.shape
+        K = self.num_gate_levels
+        N = self.num_blocks
+        Bs = self.block_size
 
         # Compute gate from real representation
         x_real_cat = torch.cat([x.real, x.imag], dim=-1)  # [B, S, 2D]
         # SEOP Fix 18: Scaled sigmoid ≈ Gaussian CDF, but ~3x faster than erf on CPU
-        # sigmoid(x * 1.7015) is a logistic-probit approximation to Φ(x).
         gate = torch.sigmoid(self.gate_proj(x_real_cat) * 1.7015)  # [B, S, D]
 
-        # Reshape gate to block form and average within each block
-        # [B, S, num_blocks, block_size] → mean over block_size → [B, S, N, 1, 1]
-        gate_blocks = gate.view(B, S, self.num_blocks, self.block_size)
-        g_block = gate_blocks.mean(dim=-1, keepdim=True).unsqueeze(
-            -1
-        )  # [B, S, N, 1, 1]
+        # Average gate within each block → scalar per (batch, seq, block)
+        gate_blocks = gate.view(B, S, N, Bs)
+        g_continuous = gate_blocks.mean(dim=-1)  # [B, S, N]
+
+        # Quantize to K discrete levels with straight-through estimator
+        level_idx = (g_continuous * (K - 1)).round().long().clamp(0, K - 1)  # [B, S, N]
+        g_levels = torch.linspace(0.0, 1.0, K, device=x.device, dtype=x.real.dtype)
+        g_quantized = g_levels[level_idx]  # [B, S, N]
+        # Straight-through: forward uses quantized, backward flows through continuous
+        g_st = g_continuous + (g_quantized - g_continuous).detach()
 
         # Enforce anti-Hermitian structure
-        A_r, A_i = self._get_skew_sym()  # [N, B_s, B_s]
+        A_r, A_i = self._get_skew_sym()  # [N, Bs, Bs]
 
-        # Scale generator by gate: gA_r, gA_i have shape [B, S, N, B_s, B_s]
-        # Broadcasting: g_block [B, S, N, 1, 1] * A [N, B_s, B_s]
-        gA_r = g_block * A_r  # [B, S, N, B_s, B_s]
-        gA_i = g_block * A_i  # [B, S, N, B_s, B_s]
+        # Precompute K Cayley maps per block: scale A by each level
+        # g_levels: [K] → [K, 1, 1, 1] for broadcasting with A [N, Bs, Bs]
+        g_scale = g_levels.view(K, 1, 1, 1)
+        gA_r_all = (g_scale * A_r.unsqueeze(0)).reshape(K * N, Bs, Bs)  # [K*N, Bs, Bs]
+        gA_i_all = (g_scale * A_i.unsqueeze(0)).reshape(K * N, Bs, Bs)  # [K*N, Bs, Bs]
+        eye_all = self._eye.expand(K * N, -1, -1)  # [K*N, Bs, Bs]
 
-        # Compute Cayley(gA) for each (batch, seq, block)
-        # Flatten batch dims for solve: [B*S*N, B_s, B_s]
-        BS = B * S
-        N = self.num_blocks
-        Bs = self.block_size
+        U_real_all, U_imag_all = _cayley_real_block(gA_r_all, gA_i_all, eye_all)
+        U_real_all = U_real_all.view(K, N, Bs, Bs)  # [K, N, Bs, Bs]
+        U_imag_all = U_imag_all.view(K, N, Bs, Bs)  # [K, N, Bs, Bs]
 
-        gA_r_flat = gA_r.reshape(BS * N, Bs, Bs)
-        gA_i_flat = gA_i.reshape(BS * N, Bs, Bs)
+        # Gather precomputed U for each (batch, seq, block)
+        # level_idx: [B, S, N] → index into U_real_all[K, N, Bs, Bs]
+        idx = level_idx.reshape(B * S * N)  # [B*S*N]
+        block_idx = torch.arange(N, device=x.device).repeat(B * S)  # [B*S*N]
 
-        # Expand eye for the batch
-        eye_flat = self._eye.expand(BS * N, -1, -1)  # [BS*N, Bs, Bs]
-
-        # Cayley map via real-block solve
-        U_real, U_imag = _cayley_real_block(gA_r_flat, gA_i_flat, eye_flat)
-
-        # Reshape U back: [B, S, N, Bs, Bs]
-        U_real = U_real.view(B, S, N, Bs, Bs)
-        U_imag = U_imag.view(B, S, N, Bs, Bs)
+        U_real = U_real_all[idx, block_idx].view(B, S, N, Bs, Bs)
+        U_imag = U_imag_all[idx, block_idx].view(B, S, N, Bs, Bs)
 
         # Reshape input to blocks: [B, S, N, Bs]
         x_blocks = x.view(B, S, N, Bs)
         xr, xi = x_blocks.real, x_blocks.imag
 
         # Apply per-(batch, seq, block) unitary: U @ x
-        # U [B, S, N, Bs, Bs] @ x [B, S, N, Bs] → [B, S, N, Bs]
-        out_real = torch.einsum("bsnoi,bsni->bsno", U_real, xr) - torch.einsum(
+        Ux_real = torch.einsum("bsnoi,bsni->bsno", U_real, xr) - torch.einsum(
             "bsnoi,bsni->bsno", U_imag, xi
         )
-        out_imag = torch.einsum("bsnoi,bsni->bsno", U_real, xi) + torch.einsum(
+        Ux_imag = torch.einsum("bsnoi,bsni->bsno", U_real, xi) + torch.einsum(
             "bsnoi,bsni->bsno", U_imag, xr
         )
+
+        # Straight-through gradient path for gate_proj:
+        # scale = g_st / (g_quantized + eps), forward ≈ 1, backward flows to gate
+        # out = x + scale * (Ux - x), so when scale=1: out = Ux (exact Cayley)
+        scale = (g_st / (g_quantized + 1e-7)).unsqueeze(-1)  # [B, S, N, 1]
+        delta_real = Ux_real - xr
+        delta_imag = Ux_imag - xi
+        out_real = xr + scale * delta_real
+        out_imag = xi + scale * delta_imag
 
         out = safe_complex(out_real, out_imag)
         return out.reshape(B, S, D)

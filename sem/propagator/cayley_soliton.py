@@ -29,6 +29,7 @@ from .hamiltonian import MultiScaleHamiltonian
 from . import cg_solver as _cg_mod
 from .cg_solver import cg_solve, cg_solve_sparse
 from .unitarity_check import check_unitarity
+from ..utils.complex_ops import safe_complex
 from sem.spinor.complex_ops import complex_mul_real
 from .chebyshev_kpm import (
     chebyshev_kpm_solve,
@@ -154,7 +155,9 @@ class CayleySolitonPropagator(nn.Module):
 
             # Step 1: Nonlinear phase rotation (Kerr effect)
             intensity = psi_r * psi_r + psi_i * psi_i
-            intensity = intensity / (intensity.mean(dim=-1, keepdim=True) + 1e-8)
+            intensity = intensity / intensity.mean(dim=-1, keepdim=True).clamp(
+                min=1e-6
+            )  # SEOP Fix 78: Safe normalization when mean near-zero
             # PIT Transform: Normalize phase distribution to prevent bunching
             phase_shift = torch.pi * (
                 1.0 - 2.0 * torch.exp(-self.pit_gamma * intensity)
@@ -169,13 +172,19 @@ class CayleySolitonPropagator(nn.Module):
             # SEOP Fix 9: Per-dimension Kerr coefficient modulates envelope strength
             alpha = torch.abs(self.alpha)  # Ensure non-negative coupling
             envelope = 1.0 + alpha * intensity * intensity  # Bounded rational envelope
+            envelope = envelope.clamp(
+                max=10.0
+            )  # SEOP Fix 78: Cap envelope to prevent vanishing gradients
             psi_rot_r = psi_rot_r / envelope
             psi_rot_i = psi_rot_i / envelope
             norm_in = (psi_r * psi_r + psi_i * psi_i).sum(dim=-1, keepdim=True)
             norm_rot = (psi_rot_r * psi_rot_r + psi_rot_i * psi_rot_i).sum(
                 dim=-1, keepdim=True
             )
-            scale = torch.sqrt((norm_in + 1e-12) / (norm_rot + 1e-12))
+            scale = torch.sqrt((norm_in + 1e-8) / (norm_rot + 1e-8))
+            scale = scale.clamp(
+                max=10.0
+            )  # SEOP Fix 78: Prevent explosive norm rescaling
             psi_rot_r = psi_rot_r * scale
             psi_rot_i = psi_rot_i * scale
 
@@ -265,7 +274,7 @@ class CayleySolitonPropagator(nn.Module):
                 H = self.hamiltonian.get_hamiltonian_dense()
                 I = torch.eye(D, dtype=H.dtype, device=H.device)
                 A_plus = I + 1j * half_dt * H
-                rhs = torch.complex(rhs_r, rhs_i)
+                rhs = safe_complex(rhs_r, rhs_i)
                 batch_size, seq_len, _ = rhs.shape
                 rhs_flat = rhs.reshape(batch_size * seq_len, D)
                 # Solve in float64: Graph Laplacians have a zero eigenvalue, so
@@ -352,7 +361,9 @@ class CayleySolitonPropagator(nn.Module):
                 Ax0 = a_minus_matvec_wrapped(x0)
                 residual = Ax0 - rhs_real_block
                 rel_residual = residual.norm() / (rhs_real_block.norm() + 1e-12)
-                skip_cg = rel_residual.item() < self.lazy_cg_tol
+                skip_cg = (
+                    rel_residual.item() < self.lazy_cg_tol
+                )  # Intentional GPU sync for lazy CG gate
                 if _t:
                     self._timing_stats.setdefault("lazy_gate", []).append(
                         time.perf_counter() - t_gate
