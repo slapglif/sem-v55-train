@@ -122,7 +122,7 @@ class TrainingConfig:
     encoder_lr_scale: float = (
         0.016  # SEOP Fix 41: Encoder LR = base_lr * this (balance gradient flow)
     )
-    warmup_steps: int = 2000
+    warmup_steps: int = 200
     max_steps: int = 100000
     gradient_clip: float = (
         1.0  # Mamba consensus: 1.0 (universal across all SSM implementations)

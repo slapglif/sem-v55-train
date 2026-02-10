@@ -372,7 +372,7 @@ class PackedStreamingDataset(IterableDataset):
         batch_size: int,
         num_workers: int = 4,
         pin_memory: bool = True,
-        prefetch_factor: int = 8,
+        prefetch_factor: int = 2,
     ) -> DataLoader:
         """Create a DataLoader for this dataset.
 
@@ -380,7 +380,7 @@ class PackedStreamingDataset(IterableDataset):
             batch_size: Batch size
             num_workers: Number of data loading workers
             pin_memory: Pin memory for CUDA
-            prefetch_factor: Number of batches each worker pre-fetches (default 8)
+            prefetch_factor: Number of batches each worker pre-fetches (default 2)
         Returns:
             PyTorch DataLoader
         """

@@ -30,11 +30,12 @@ from .callbacks import WandbCallback, ConsoleCallback
 logger = logging.getLogger(__name__)
 
 
-def _sync_and_time(device_type: str) -> float:
-    if device_type == "cuda":
-        torch.cuda.synchronize()
-    elif device_type == "xpu":
-        torch.xpu.synchronize()
+def _sync_and_time(device_type: str, sync: bool = True) -> float:
+    if sync:
+        if device_type == "cuda":
+            torch.cuda.synchronize()
+        elif device_type == "xpu":
+            torch.xpu.synchronize()
     return time.perf_counter()
 
 
@@ -169,6 +170,9 @@ class SEMTrainer:
             weight_decay=config.training.weight_decay,
             temperature=0,  # SEOP Fix 49: Disable TNGD noise — amplified by 1/denom during warmup
         )
+        # SEOP Fix 83: Store base LRs for health-error floor calculation
+        self._base_lrs = [pg["lr"] for pg in self.optimizer.param_groups]
+        self._health_lr_reductions = 0
 
         # Scheduler
         self.scheduler = WSDScheduler(
@@ -533,7 +537,7 @@ class SEMTrainer:
             nan_detected = False
 
             try:
-                t_step_start = _sync_and_time(self.device.type)
+                t_step_start = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
                 # Gradient accumulation loop
                 for accum_idx in range(accum_steps):
@@ -557,10 +561,14 @@ class SEMTrainer:
                     token_ids, token_freqs = batch
                     token_ids = token_ids.to(self.device)
                     token_freqs = token_freqs.to(self.device)
-                    t_transfer_end = _sync_and_time(self.device.type)
+                    t_transfer_end = _sync_and_time(
+                        self.device.type, sync=c.timing_enabled
+                    )
 
                     current_phase = "forward"
-                    t_forward_start = _sync_and_time(self.device.type)
+                    t_forward_start = _sync_and_time(
+                        self.device.type, sync=c.timing_enabled
+                    )
                     amp_ctx = (
                         torch.amp.autocast(self.device.type, dtype=self._amp_dtype)
                         if self._use_amp
@@ -570,7 +578,9 @@ class SEMTrainer:
                         output = self.model(
                             token_ids, targets=token_ids, token_freqs=token_freqs
                         )
-                    t_forward_end = _sync_and_time(self.device.type)
+                    t_forward_end = _sync_and_time(
+                        self.device.type, sync=c.timing_enabled
+                    )
 
                     current_phase = "loss_compute"
                     t_loss_start = time.perf_counter()
@@ -588,7 +598,7 @@ class SEMTrainer:
                         step_metrics.update(dist_metrics)
                     else:
                         loss = output["loss"]
-                    t_loss_end = _sync_and_time(self.device.type)
+                    t_loss_end = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
                     current_phase = "backward"
                     t_backward_start = time.perf_counter()
@@ -597,7 +607,9 @@ class SEMTrainer:
                         self._grad_scaler.scale(scaled_loss).backward()
                     else:
                         scaled_loss.backward()
-                    t_backward_end = _sync_and_time(self.device.type)
+                    t_backward_end = _sync_and_time(
+                        self.device.type, sync=c.timing_enabled
+                    )
 
                     # NaN/Inf detection after backward
                     loss_val = loss.item()
@@ -656,18 +668,18 @@ class SEMTrainer:
                     continue
 
                 current_phase = "grad_clip"
-                t_clip_start = _sync_and_time(self.device.type)
+                t_clip_start = _sync_and_time(self.device.type, sync=c.timing_enabled)
                 if self._grad_scaler is not None:
                     self._grad_scaler.unscale_(self.optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), c.gradient_clip
                 ).item()
-                t_clip_end = _sync_and_time(self.device.type)
+                t_clip_end = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
                 current_phase = "fisher_update"
                 t_fisher_start = time.perf_counter()
                 self.quantizer.update_fisher(self.model)
-                t_fisher_end = _sync_and_time(self.device.type)
+                t_fisher_end = _sync_and_time(self.device.type, sync=c.timing_enabled)
 
                 if self._check_nan_params():
                     self._reduce_lr_on_nan("parameter NaN/Inf before optimizer step")
@@ -690,7 +702,7 @@ class SEMTrainer:
                     logger.info(
                         f"[SCHEDULER] Triggered cosine decay at step {self.global_step}"
                     )
-                t_optim_end = _sync_and_time(self.device.type)
+                t_optim_end = _sync_and_time(self.device.type, sync=c.timing_enabled)
                 # Reset NaN counter on successful step
                 self._consecutive_nan_steps = 0
 
@@ -829,10 +841,22 @@ class SEMTrainer:
                         quantizer=self.quantizer,
                         wandb_run_id=self.wandb_cb.run_id,
                     )
-                    # Reduce LR
-                    for pg in self.optimizer.param_groups:
-                        pg["lr"] *= 0.5
-                    logger.warning(f"Reduced LR by 50% due to health error")
+                    # Reduce LR with floor and cap (SEOP Fix 83)
+                    max_health_reductions = 5
+                    if self._health_lr_reductions < max_health_reductions:
+                        self._health_lr_reductions += 1
+                        for i, pg in enumerate(self.optimizer.param_groups):
+                            floor = self._base_lrs[i] * 0.01
+                            pg["lr"] = max(pg["lr"] * 0.5, floor)
+                        logger.warning(
+                            f"Reduced LR by 50% due to health error "
+                            f"(reduction {self._health_lr_reductions}/{max_health_reductions}, "
+                            f"floor={self._base_lrs[0] * 0.01:.2e})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Health error detected but max LR reductions ({max_health_reductions}) reached — skipping"
+                        )
 
             # Curriculum transition check
             current_phase = "curriculum_transition"

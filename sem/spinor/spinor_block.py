@@ -175,22 +175,6 @@ class SpinorBlock(nn.Module):
         # Reshape back: [B, S, D]
         return out.reshape(B, S, D)
 
-    def unitarity_loss(self) -> Tensor:
-        """Compute ||U†U - I||²_F as a diagnostic (should be ~0).
-
-        With Cayley parameterization, U is structurally unitary,
-        so this should return a value near machine epsilon. Useful
-        as a sanity check / monitoring metric rather than a loss term.
-        """
-        A_r, A_i = self._get_skew_sym()
-        U_real, U_imag = _cayley_real_block(A_r, A_i, self._eye)
-
-        W = safe_complex(U_real, U_imag)  # [N, B, B]
-        W_dag = W.conj().transpose(-2, -1)
-        WdW = torch.bmm(W_dag, W)  # [N, B, B]
-        I = torch.eye(self.block_size, device=W.device, dtype=W.dtype).unsqueeze(0)
-        return ((WdW - I).abs() ** 2).mean()
-
 
 class SpinorGate(nn.Module):
     """Gated unitary transformation with selective activation via Cayley map.

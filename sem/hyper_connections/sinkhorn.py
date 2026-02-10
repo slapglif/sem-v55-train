@@ -33,6 +33,21 @@ from torch import Tensor
 from typing import Optional
 
 
+def _ds_postnorm(h: Tensor, iters: int = 2, eps: float = 1e-12) -> Tensor:
+    """Post-normalize to guarantee doubly-stochastic within tight tolerance.
+
+    Applies alternating row/column normalization with straight-through
+    estimator so forward uses the corrected matrix but backward passes
+    gradients through the original Sinkhorn output.
+    """
+    h0 = h
+    for _ in range(iters):
+        h = h / (h.sum(dim=-1, keepdim=True) + eps)
+        h = h / (h.sum(dim=-2, keepdim=True) + eps)
+    # Straight-through: forward uses postnormed, backward uses original
+    return h0 + (h - h0).detach()
+
+
 def sinkhorn_log(
     logits: Tensor,
     num_iters: int = 20,
@@ -74,6 +89,8 @@ def sinkhorn_log(
         v = -torch.logsumexp(Z + u.unsqueeze(-1), dim=-2)
 
     H = torch.exp(Z + u.unsqueeze(-1) + v.unsqueeze(-2))
+
+    H = _ds_postnorm(H)
 
     return H
 

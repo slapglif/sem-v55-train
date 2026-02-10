@@ -131,6 +131,9 @@ def train_tokenizer(config: SEMConfig):
 
 
 def main():
+    # Enable TF32 for speed on Ampere+ GPUs (RTX 3060)
+    torch.set_float32_matmul_precision("high")
+
     parser = argparse.ArgumentParser(description="Train SEM V5.5 'Lean Crystal'")
     parser.add_argument(
         "--config",

@@ -91,11 +91,21 @@ class LindbladDissipation(nn.Module):
 
     @property
     def gamma(self) -> float:
-        """Current dissipation strength."""
-        gamma = (
-            torch.sigmoid(self.log_gamma - math.log(self.gamma_max)) * self.gamma_max
-        )
-        return gamma.item()
+        """Current dissipation strength (scalar for diagnostics/logging).
+
+        NOTE: This calls .item() which causes GPU-CPU sync. Do NOT call in
+        forward pass hot path. Use _gamma_tensor() for forward-path computation.
+        """
+        return self._gamma_tensor().item()
+
+    def _gamma_tensor(self) -> Tensor:
+        """Compute gamma as a tensor (no GPU sync). Use in forward/backward.
+
+        Uses exp(log_gamma) clamped to [0, gamma_max] for simple gradients.
+        This matches the SEOP Fix 55 behavior that was previously monkey-patched
+        in model.py.
+        """
+        return torch.exp(self.log_gamma).clamp(max=self.gamma_max)
 
     def invalidate_cache(self):
         self._cached_L_dag_L = None
@@ -136,9 +146,7 @@ class LindbladDissipation(nn.Module):
 
         # Apply dissipation: -0.5·γ·dt·(Σ L_k† L_k)·ψ
         # psi: [B, S, D], L_dag_L_sum: [D, D]
-        gamma = (
-            torch.sigmoid(self.log_gamma - math.log(self.gamma_max)) * self.gamma_max
-        )
+        gamma = self._gamma_tensor()
         dissipation_coeff = -0.5 * gamma * dt
 
         # Matrix-vector product: [D, D] @ [B, S, D]
@@ -170,125 +178,15 @@ class LindbladDissipation(nn.Module):
         L_psi = torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)  # [B, S, D]
         expectation = (psi.conj() * L_psi).sum(dim=-1).real  # [B, S]
 
-        gamma = (
-            torch.sigmoid(self.log_gamma - math.log(self.gamma_max)) * self.gamma_max
-        )
+        gamma = self._gamma_tensor()
         rate = -gamma * expectation
 
         return rate
 
     def extra_repr(self) -> str:
+        # Use .item() here — extra_repr is only called for printing, never in forward
         return (
             f"dim={self.dim}, num_ops={self.num_lindblad_ops}, gamma={self.gamma:.6f}"
-        )
-
-
-class AdaptiveLindbladDissipation(nn.Module):
-    """Adaptive Lindblad dissipation with input-dependent γ.
-
-    Instead of fixed dissipation strength, γ is computed from the input state.
-    This allows the model to learn when to dissipate (high entropy) vs when
-    to preserve (low entropy).
-
-    Dissipation control: γ(ψ) = σ(W·|ψ|² + b)·γ_max
-
-    This implements ONLY the deterministic (no-jump) drift term. Without jump
-    terms, only A = Σ_k L_k† L_k affects the evolution, but we keep individual
-    L_k for future extensibility and analysis.
-
-    Args:
-        dim: Spinor dimension D
-        num_lindblad_ops: Number of Lindblad operators K (default 4)
-        gamma_max: Maximum dissipation strength (default 0.05)
-        init_scale: Initialization scale for L operators (default 0.01)
-    """
-
-    def __init__(
-        self,
-        dim: int,
-        num_lindblad_ops: int = 4,
-        gamma_max: float = 0.05,
-        init_scale: float = 0.01,
-    ):
-        super().__init__()
-        self.dim = dim
-        self.num_lindblad_ops = num_lindblad_ops
-        self.gamma_max = gamma_max
-
-        # Lindblad operators (same as fixed-gamma version)
-        self.L_real = nn.Parameter(torch.randn(num_lindblad_ops, dim, dim) * init_scale)
-        self.L_imag = nn.Parameter(torch.randn(num_lindblad_ops, dim, dim) * init_scale)
-
-        # Initialize as diagonal-dominant
-        with torch.no_grad():
-            for k in range(num_lindblad_ops):
-                self.L_real[k].diagonal().add_(0.1)
-
-        # Adaptive gamma network: |ψ|² -> γ
-        # Input: magnitude squared [B, S, D]
-        # Output: scalar gamma [B, S, 1]
-        self.gamma_proj = nn.Linear(dim, 1, bias=True)
-        nn.init.zeros_(self.gamma_proj.weight)
-        nn.init.constant_(self.gamma_proj.bias, 0.0)  # Start with γ ≈ γ_max/2
-
-    def compute_lindblad_term(self) -> Tensor:
-        """Compute Σ_k L_k† L_k (same as fixed-gamma version)."""
-        L = safe_complex(self.L_real, self.L_imag)  # [K, D, D]
-        L_dag = L.conj().transpose(-2, -1)  # [K, D, D]
-        L_dag_L = torch.bmm(L_dag, L)  # [K, D, D]
-        L_dag_L_sum = L_dag_L.sum(dim=0)  # [D, D]
-        return L_dag_L_sum
-
-    def compute_gamma(self, psi: Tensor) -> Tensor:
-        """Compute adaptive dissipation strength from input state.
-
-        Args:
-            psi: [B, S, D] complex64
-
-        Returns:
-            gamma: [B, S, 1] float32
-        """
-        # Magnitude squared as entropy proxy
-        mag_sq = psi.real**2 + psi.imag**2  # [B, S, D]
-
-        # Project to scalar and apply sigmoid
-        gamma_logit = self.gamma_proj(mag_sq)  # [B, S, 1]
-        gamma = torch.sigmoid(gamma_logit) * self.gamma_max
-
-        return gamma
-
-    def forward(self, psi: Tensor, dt: float = 1.0) -> Tensor:
-        """Apply adaptive Lindblad dissipation.
-
-        Args:
-            psi: [B, S, D] complex64
-            dt: Time step
-
-        Returns:
-            psi_dissipated: [B, S, D] complex64
-        """
-        # Compute adaptive γ(ψ)
-        gamma = self.compute_gamma(psi)  # [B, S, 1]
-
-        # Compute dissipation operator
-        L_dag_L_sum = self.compute_lindblad_term()  # [D, D]
-
-        # Apply dissipation with adaptive strength
-        dissipation_coeff = -0.5 * gamma * dt  # [B, S, 1]
-
-        # Matrix-vector with broadcasting
-        # Cost: O(D^2) per (batch, seq) position
-        L_psi = torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)  # [B, S, D]
-        dissipation = dissipation_coeff * L_psi
-
-        psi_out = psi + dissipation
-
-        return psi_out
-
-    def extra_repr(self) -> str:
-        return (
-            f"dim={self.dim}, num_ops={self.num_lindblad_ops}, "
-            f"gamma_max={self.gamma_max:.4f}"
         )
 
 

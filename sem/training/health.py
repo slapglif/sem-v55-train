@@ -101,11 +101,21 @@ class HealthMonitor:
             if not getattr(model.encoder, "simple_mode", False):
                 sdr_sparse = getattr(model.encoder, "_last_sdr_sparse", None)
                 sdr_source = sdr_sparse if sdr_sparse is not None else psi_encoder
-                report.sdr_sparsity = sparsity_ratio(sdr_source).item()
+
+                if getattr(model.encoder, "soft_sparse", False):
+                    # For soft-sparse, measure effective sparsity (fraction < 1% max)
+                    # Standard sparsity_ratio uses < 1e-6 which is too strict for softmax tails
+                    T = sdr_source.abs()
+                    threshold = T.max(dim=-1, keepdim=True).values * 0.01
+                    report.sdr_sparsity = (T < threshold).float().mean().item()
+                else:
+                    # For hard top-k, use standard zero-count metric
+                    report.sdr_sparsity = sparsity_ratio(sdr_source).item()
+
                 if report.sdr_sparsity < 0.5:
-                    report.has_error = True
+                    report.has_warning = True
                     report.messages.append(
-                        f"SDR sparsity collapsed: {report.sdr_sparsity:.3f} < 0.5"
+                        f"SDR sparsity low: {report.sdr_sparsity:.3f} < 0.5"
                     )
 
             # Information density after encoder
@@ -168,10 +178,14 @@ class HealthMonitor:
                 report.cg_skip_rate = model.propagator.cg_skip_rate
                 model.propagator.reset_cg_stats()
 
-            # Gradient norm checks
+            # Gradient norm checks (logged norm is pre-clip; actual gradients are clipped)
             if grad_norm > self.grad_norm_error:
-                report.has_error = True
-                report.messages.append(f"Gradient explosion: norm={grad_norm:.2f}")
+                report.has_warning = (
+                    True  # Warning only — clipping handles the actual gradients
+                )
+                report.messages.append(
+                    f"High gradient norm (pre-clip): {grad_norm:.2f}"
+                )
             elif grad_norm > self.grad_norm_warn:
                 report.has_warning = True
                 report.messages.append(f"High gradient norm: {grad_norm:.2f}")

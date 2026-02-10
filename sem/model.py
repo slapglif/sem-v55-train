@@ -46,131 +46,6 @@ except ImportError:
 HAS_MHC = _has_mhc
 
 
-# -----------------------------------------------------------------------------
-# Compatibility shims (tests + legacy API expectations)
-# -----------------------------------------------------------------------------
-
-# SEOP Fix 55: LindbladDissipation API compatibility.
-# Some tests/legacy code expect a learnable `log_gamma` parameter with
-# `gamma = exp(log_gamma)`. The current implementation uses a sigmoid-bounded
-# `gamma_logit` for stability. Add a backward-compatible `log_gamma` parameter
-# and route dissipation strength through it.
-if hasattr(LindbladDissipation, "__init__") and not hasattr(
-    LindbladDissipation, "_seop_fix_55_log_gamma"
-):
-    _orig_lindblad_init = LindbladDissipation.__init__
-    _orig_lindblad_forward = LindbladDissipation.forward
-    _orig_lindblad_rate = getattr(LindbladDissipation, "dissipation_rate", None)
-
-    def _patched_lindblad_init(
-        self,
-        dim: int,
-        num_lindblad_ops: int = 4,
-        gamma: float = 0.01,
-        learnable_gamma: bool = True,
-        init_scale: float = 0.01,
-    ):
-        _orig_lindblad_init(
-            self,
-            dim=dim,
-            num_lindblad_ops=num_lindblad_ops,
-            gamma=gamma,
-            learnable_gamma=learnable_gamma,
-            init_scale=init_scale,
-        )
-
-        gamma_init = float(gamma)
-        gamma_init = max(gamma_init, 1e-12)
-        log_gamma_init = torch.log(torch.tensor(gamma_init, dtype=torch.float32))
-
-        if learnable_gamma:
-            self.log_gamma = nn.Parameter(log_gamma_init)
-        else:
-            self.register_buffer("log_gamma", log_gamma_init)
-
-    def _patched_lindblad_forward(self, psi: Tensor, dt: float = 1.0) -> Tensor:
-        if hasattr(self, "log_gamma"):
-            L_dag_L_sum = self.compute_lindblad_term()  # [D, D]
-            gamma = torch.exp(self.log_gamma)
-            gamma_max = getattr(self, "gamma_max", None)
-            if gamma_max is not None:
-                gamma = torch.clamp(gamma, max=float(gamma_max))
-            dissipation_coeff = -0.5 * gamma * dt
-            dissipation = dissipation_coeff * torch.einsum(
-                "ij,bsj->bsi", L_dag_L_sum, psi
-            )
-            return psi + dissipation
-        return _orig_lindblad_forward(self, psi, dt=dt)
-
-    def _patched_lindblad_rate(self, psi: Tensor) -> Tensor:
-        if hasattr(self, "log_gamma"):
-            L_dag_L_sum = self.compute_lindblad_term()  # [D, D]
-            L_psi = torch.einsum("ij,bsj->bsi", L_dag_L_sum, psi)  # [B, S, D]
-            expectation = (psi.conj() * L_psi).sum(dim=-1).real  # [B, S]
-
-            gamma = torch.exp(self.log_gamma)
-            gamma_max = getattr(self, "gamma_max", None)
-            if gamma_max is not None:
-                gamma = torch.clamp(gamma, max=float(gamma_max))
-            return -gamma * expectation
-        assert _orig_lindblad_rate is not None
-        return _orig_lindblad_rate(self, psi)
-
-    LindbladDissipation.__init__ = _patched_lindblad_init  # type: ignore[method-assign]
-    LindbladDissipation.forward = _patched_lindblad_forward  # type: ignore[method-assign]
-    if _orig_lindblad_rate is not None:
-        LindbladDissipation.dissipation_rate = _patched_lindblad_rate  # type: ignore[method-assign]
-    setattr(LindbladDissipation, "_seop_fix_55_log_gamma", True)
-
-
-# SEOP Fix 56: Sinkhorn post-normalization for doubly-stochastic guarantees.
-# Some configurations drift just outside tight tolerances, especially for batched
-# inputs and complex magnitude projection. Enforce row/col normalization at the
-# end to avoid test flakiness and improve mHC stability.
-try:
-    from .hyper_connections import sinkhorn as _sinkhorn_mod
-    from .hyper_connections import mhc as _mhc_mod
-    from . import hyper_connections as _hyper_connections_pkg
-
-    if not getattr(_sinkhorn_mod, "_seop_fix_56_postnorm", False):
-        _orig_sinkhorn_log = _sinkhorn_mod.sinkhorn_log
-        _orig_sinkhorn_log_complex = _sinkhorn_mod.sinkhorn_log_complex
-
-        def _ds_postnorm(h: Tensor, iters: int = 2, eps: float = 1e-12) -> Tensor:
-            for _ in range(iters):
-                h = h / (h.sum(dim=-1, keepdim=True) + eps)
-                h = h / (h.sum(dim=-2, keepdim=True) + eps)
-            return h
-
-        def sinkhorn_log(*args, **kwargs) -> Tensor:
-            H0 = _orig_sinkhorn_log(*args, **kwargs)
-            Hn = _ds_postnorm(H0)
-            # Straight-through: forward uses post-norm, backward uses original.
-            return H0 + (Hn - H0).detach()
-
-        def sinkhorn_log_complex(*args, **kwargs):
-            H0_real, H0_imag = _orig_sinkhorn_log_complex(*args, **kwargs)
-            # After SEOP Fix 73, H0_imag is zeros. Postnorm H_real directly
-            # (not its magnitude) to preserve sign, and pass H0_imag through.
-            Hn_real = _ds_postnorm(H0_real)
-            # Straight-through: forward uses post-norm, backward uses original.
-            return H0_real + (Hn_real - H0_real).detach(), H0_imag
-
-        _sinkhorn_mod.sinkhorn_log = sinkhorn_log
-        _sinkhorn_mod.sinkhorn_log_complex = sinkhorn_log_complex
-        setattr(_sinkhorn_mod, "_seop_fix_56_postnorm", True)
-
-        # Patch re-exported symbols and mhc module-local imports.
-        _hyper_connections_pkg.sinkhorn_log = sinkhorn_log
-        _hyper_connections_pkg.sinkhorn_log_complex = sinkhorn_log_complex
-        _mhc_mod.sinkhorn_log = sinkhorn_log
-        _mhc_mod.sinkhorn_log_complex = sinkhorn_log_complex
-
-except Exception:
-    # Keep SEMModel importable even if hyper_connections is unavailable.
-    pass
-
-
 class ComplexMamba3LayerV8(nn.Module):
     """V8.0 Mamba layer with Lindblad, Quaternionic escape, and optional mHC.
 
@@ -654,46 +529,99 @@ class SEMModel(nn.Module):
         psi = self.final_norm(psi)  # [B, S, D] complex64
 
         # 5. Collapse: log-linear projection (SEOP Fix 48)
-        output = self.sampler(
-            psi,
-            input_ids=token_ids if not self.training else None,
-            sample=not self.training,
-        )
+        # Check for Low VRAM Training Mode (Chunked Loss)
+        if self.training and self.config.training.low_vram_mode and targets is not None:
+            # SEOP Fix 82: Chunked Cross Entropy to avoid OOM on large vocab/batch.
+            # Instead of materializing [B, S, V] logits (huge), we compute loss in chunks.
 
-        # Expose monitoring metric for trainers/curriculum.
-        output["unitary_divergence"] = unitary_divergence
+            output = {}  # Don't materialize full logits
+            output["unitary_divergence"] = unitary_divergence
 
-        # Compute loss if targets provided
-        if targets is not None:
-            # Shift for next-token prediction: predict token[t+1] from state[t]
-            logits = output["logits"][:, :-1, :].contiguous()
-            target_ids = targets[:, 1:].contiguous()
-            loss = F.cross_entropy(
-                logits.view(-1, logits.shape[-1]),
-                target_ids.view(-1),
-                label_smoothing=self.config.training.label_smoothing,
-            )
+            # Shift targets for next-token prediction
+            psi_shifted = psi[:, :-1, :].reshape(-1, psi.shape[-1])  # [B*(S-1), D]
+            targets_shifted = targets[:, 1:].reshape(-1)  # [B*(S-1)]
 
-            # Apply unitarity regularization strength from config.
+            chunk_size = 1024  # Process 1024 tokens at a time
+            total_loss = 0.0
+            total_tokens = 0
+
+            for i in range(0, psi_shifted.shape[0], chunk_size):
+                end = min(i + chunk_size, psi_shifted.shape[0])
+                p_chunk = psi_shifted[i:end]
+                t_chunk = targets_shifted[i:end]
+
+                # Compute logits for chunk using sampler's projection
+                l_chunk = self.sampler.compute_logits(p_chunk)  # [chunk, V]
+
+                loss_chunk = F.cross_entropy(
+                    l_chunk,
+                    t_chunk,
+                    reduction="sum",
+                    label_smoothing=self.config.training.label_smoothing,
+                )
+
+                total_loss = total_loss + loss_chunk
+                total_tokens += end - i
+
+                del l_chunk
+
+            loss = total_loss / max(total_tokens, 1)
+
+            # Apply unitarity regularization
             unitary_lambda = float(getattr(self.config.training, "unitary_lambda", 0.0))
             if unitary_lambda != 0.0:
-                # SEOP Fix 54: Keep unitary_divergence in the gradient graph.
-                # This provides an actual regularization signal (with safety clamping)
-                # rather than a detached metric.
                 loss = loss + unitary_lambda * unitary_divergence
 
-            # V8: Add unitarity regularization from HybridAutomata layers
+            # V8 Regularization
             if self._use_v8_layers:
                 for layer in self.mamba_layers:
-                    if not getattr(layer, "use_hybrid_automata", False):
-                        continue
-                    hybrid = getattr(layer, "hybrid_automata", None)
-                    if hybrid is None:
-                        continue
-                    if unitary_lambda != 0.0:
-                        loss = loss + unitary_lambda * hybrid.compute_unitarity_loss()
+                    if getattr(layer, "use_hybrid_automata", False):
+                        hybrid = getattr(layer, "hybrid_automata", None)
+                        if hybrid and unitary_lambda != 0.0:
+                            loss = (
+                                loss + unitary_lambda * hybrid.compute_unitarity_loss()
+                            )
 
             output["loss"] = loss
+
+        else:
+            # Standard Path (Full Logits) or Inference
+            output = self.sampler(
+                psi,
+                input_ids=token_ids if not self.training else None,
+                sample=not self.training,
+            )
+            output["unitary_divergence"] = unitary_divergence
+
+            # Compute loss if targets provided
+            if targets is not None:
+                logits = output["logits"][:, :-1, :].contiguous()
+                target_ids = targets[:, 1:].contiguous()
+                loss = F.cross_entropy(
+                    logits.view(-1, logits.shape[-1]),
+                    target_ids.view(-1),
+                    label_smoothing=self.config.training.label_smoothing,
+                )
+
+                unitary_lambda = float(
+                    getattr(self.config.training, "unitary_lambda", 0.0)
+                )
+                if unitary_lambda != 0.0:
+                    loss = loss + unitary_lambda * unitary_divergence
+
+                if self._use_v8_layers:
+                    for layer in self.mamba_layers:
+                        if getattr(layer, "use_hybrid_automata", False):
+                            hybrid = getattr(layer, "hybrid_automata", None)
+                            if hybrid is None:
+                                continue
+                            if unitary_lambda != 0.0:
+                                loss = (
+                                    loss
+                                    + unitary_lambda * hybrid.compute_unitarity_loss()
+                                )
+
+                output["loss"] = loss
 
         return output
 

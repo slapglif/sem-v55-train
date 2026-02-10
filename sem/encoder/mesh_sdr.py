@@ -59,6 +59,16 @@ class MESHEncoder(nn.Module):
         self.soft_sparse_temp = soft_sparse_temp
         self.simple_mode = simple_mode
 
+        # SEOP Fix 85: Learnable temperature for soft-sparse
+        # Allows model to adaptively tune the sparsity/gradient trade-off.
+        # Initialized to config value (typically 0.1).
+        if soft_sparse:
+            self.soft_sparse_log_temp = nn.Parameter(
+                torch.tensor(math.log(max(soft_sparse_temp, 1e-6)))
+            )
+        else:
+            self.register_parameter("soft_sparse_log_temp", None)
+
         # Keep attributes initialized for type checkers.
         self._last_sdr_sparse: Optional[Tensor] = None
 
@@ -183,8 +193,12 @@ class MESHEncoder(nn.Module):
         T_abs = transport.abs()
 
         if self.soft_sparse:
+            # SEOP Fix 85: Adaptive soft-sparse with learnable temperature
+            # Clamp temp to reasonable range [0.01, 1.0] to prevent instabilities
+            temp = self.soft_sparse_log_temp.exp().clamp(min=0.01, max=1.0)
+
             # Soft-sparse: temperature-scaled attention weighting (all dims active)
-            T_weights = torch.softmax(T_abs / self.soft_sparse_temp, dim=-1)
+            T_weights = torch.softmax(T_abs / temp, dim=-1)
             T_sparse = transport * T_weights
 
             # SEOP audit (MESHEncoder): softmax weights are ~1/K when T is near-uniform at init,
@@ -194,14 +208,13 @@ class MESHEncoder(nn.Module):
             new_row_sum = T_sparse.abs().sum(dim=-1, keepdim=True).clamp(min=1e-12)
             T_sparse = T_sparse * (original_row_sum / new_row_sum)
         else:
-            # Hard sparse: original top-k sparsification
-            topk_vals, topk_idx = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
-            tau = topk_vals[..., -1:]
-            T_sparse = torch.sign(transport) * torch.relu(T_abs - tau)
-            fallback = T_sparse.abs().sum(dim=-1, keepdim=True) <= 1e-12
-            if fallback.any():
-                mask = torch.zeros_like(T_abs).scatter(-1, topk_idx, 1.0)
-                T_sparse = torch.where(fallback, transport * mask, T_sparse)
+            # SEOP Fix 84: Hard top-k with binary mask (not soft thresholding).
+            # Previous soft threshold relu(|T| - tau) left many small-but-nonzero
+            # residuals, causing sparsity_ratio to read ~14% instead of expected ~88%.
+            # Binary mask gives exact zeros for clean sparsity measurement.
+            _, topk_idx = torch.topk(T_abs, self.sdr_sparsity, dim=-1)
+            mask = torch.zeros_like(T_abs).scatter(-1, topk_idx, 1.0)
+            T_sparse = transport * mask
 
         self._last_sdr_sparse = T_sparse.detach()
 

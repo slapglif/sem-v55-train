@@ -257,7 +257,11 @@ class CayleySolitonPropagator(nn.Module):
                 psi_out = torch.view_as_complex(
                     torch.stack([out_r, out_i], dim=-1).contiguous()
                 )
-                self._psi_cache = psi_out.detach().clone()
+                # SEOP Fix 81: In-place cache update (no .clone())
+                if self._psi_cache is None or self._psi_cache.shape != psi_out.shape:
+                    self._psi_cache = psi_out.detach()
+                else:
+                    self._psi_cache.copy_(psi_out.detach())
                 self.hamiltonian.clear_cache()
 
                 if self.check_unitarity_flag and not self.training:
@@ -295,7 +299,11 @@ class CayleySolitonPropagator(nn.Module):
                     )
                     psi_out_flat = rhs_flat
                 psi_out = psi_out_flat.reshape(batch_size, seq_len, D)
-                self._psi_cache = psi_out.detach().clone()
+                # SEOP Fix 81: In-place cache update (no .clone())
+                if self._psi_cache is None or self._psi_cache.shape != psi_out.shape:
+                    self._psi_cache = psi_out.detach()
+                else:
+                    self._psi_cache.copy_(psi_out.detach())
 
                 self.hamiltonian.clear_cache()
 
@@ -365,8 +373,10 @@ class CayleySolitonPropagator(nn.Module):
                     # During torch.compile: always run CG (no graph break)
                     skip_cg = False
                 else:
-                    # Eager mode: use lazy CG gate with GPU→CPU sync
-                    skip_cg = rel_residual.item() < self.lazy_cg_tol
+                    # Eager mode optimization: GPU sync (.item()) costs ~4000ms.
+                    # With cg_max_iter=5 and D=256, full CG (<1s) is faster than sync (4s).
+                    # Skip the check and always run CG to keep CPU/GPU async.
+                    skip_cg = False
                 if _t:
                     self._timing_stats.setdefault("lazy_gate", []).append(
                         time.perf_counter() - t_gate
@@ -411,7 +421,11 @@ class CayleySolitonPropagator(nn.Module):
             psi_out = torch.view_as_complex(
                 psi_out_real_block.reshape(batch_size, seq_len, D, 2)
             )
-            self._psi_cache = psi_out.detach().clone()
+            # SEOP Fix 81: In-place cache update (no .clone())
+            if self._psi_cache is None or self._psi_cache.shape != psi_out.shape:
+                self._psi_cache = psi_out.detach()
+            else:
+                self._psi_cache.copy_(psi_out.detach())
 
             self.hamiltonian.clear_cache()
 
