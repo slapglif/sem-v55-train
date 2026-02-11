@@ -67,7 +67,7 @@ training:
   micro_batch_size: 32
   gradient_checkpointing: false
   dtype: float32
-  learning_rate: 1.0e-3
+  learning_rate: 3.0e-4
   weight_decay: 0.1
   encoder_lr_scale: 0.1
   warmup_steps: 200

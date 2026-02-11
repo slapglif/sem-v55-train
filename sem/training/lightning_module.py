@@ -94,9 +94,26 @@ class SEMLightningModule(L.LightningModule):
         if hasattr(self.model, "propagator"):
             self.model.propagator.set_training_step(self.trainer.global_step)
 
-        # Smooth propagator warmup: ramp alpha from 0→1 over warmup_steps
+        # Trigger WSD decay phase after warmup completes
         warmup_steps = self.config.training.warmup_steps
         step = self.trainer.global_step
+        stable_steps = getattr(self.config.training, "stable_steps", 0)
+        decay_trigger_step = warmup_steps + stable_steps
+        if step == decay_trigger_step:
+            lr_schedulers = self.lr_schedulers()
+            sched = (
+                lr_schedulers
+                if not isinstance(lr_schedulers, list)
+                else lr_schedulers[0]
+            )
+            if hasattr(sched, "begin_decay"):
+                sched.begin_decay()
+                logger.info(
+                    f"[SCHEDULER] Triggered cosine decay at step {step} "
+                    f"(warmup={warmup_steps}, stable={stable_steps})"
+                )
+
+        # Smooth propagator warmup: ramp alpha from 0→1 over warmup_steps
         if warmup_steps > 0 and step <= warmup_steps:
             raw_alpha = step / warmup_steps
             # SEOP Perf: Skip propagator entirely during early warmup (<10%)
