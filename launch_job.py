@@ -104,7 +104,7 @@ if not token:
 
 api = HfApi(token=token)
 job = api.run_job(
-    image="pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
+    image="pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel",
     command=["bash", "-c", cmd],
     flavor=args.flavor,
     timeout=args.timeout,
