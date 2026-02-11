@@ -65,7 +65,7 @@ sampler:
 
 training:
   batch_size: 2048
-  micro_batch_size: 128
+  micro_batch_size: 64
   gradient_checkpointing: false
   dtype: float32
   learning_rate: 3.0e-4

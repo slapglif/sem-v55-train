@@ -291,9 +291,10 @@ class ComplexMamba3Layer(nn.Module):
                     chunk_size=256,
                 )
                 self._use_mamba2 = True
-            except ImportError:
+            except Exception as e:
                 logger.warning(
-                    "mamba-ssm not available; falling back to ComplexSSMState."
+                    "mamba-ssm not available; falling back to ComplexSSMState. "
+                    f"Error: {type(e).__name__}: {e}"
                 )
 
         if not self._use_mamba2:
