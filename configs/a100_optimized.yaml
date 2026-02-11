@@ -39,7 +39,7 @@ propagator:
   lazy_cg_tol: 1.0e-6
   pit_gamma: 0.05
   use_chebyshev_kpm: true
-  chebyshev_degree: 12
+  chebyshev_degree: 16
 
 quantizer:
   codebook_size: 256
