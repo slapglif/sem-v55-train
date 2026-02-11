@@ -177,23 +177,22 @@ def main():
     model = SEMLightningModule(config)
 
     if device_type == "cuda" and not args.no_compile:
-        try:
-            # SEOP Fix: Partial compilation for float32 submodules
-            # Full torch.compile fails on complex tensors (stride errors)
-            from sem.training.partial_compile import SelectiveCompileWrapper
-
-            # Compile only safe float32 components
-            compile_list = ["encoder", "sampler", "final_norm"]
-            # Note: mamba_layers and propagator contain complex ops, so we skip them for now
-            # unless we implement Real-Block conversion.
-
-            model = SelectiveCompileWrapper(
-                model, compile_list=compile_list, mode="reduce-overhead"
-            )
-            logger.info(f"Partial torch.compile applied to: {compile_list}")
-        except Exception as e:
-            logger.warning(f"Partial compilation failed: {e}")
-            logger.info("Falling back to eager mode")
+        compile_list = ["encoder", "sampler", "final_norm"]
+        compiled_count = 0
+        inner_model = model.model
+        for name in compile_list:
+            submod = getattr(inner_model, name, None)
+            if submod is not None:
+                try:
+                    setattr(
+                        inner_model, name, torch.compile(submod, mode="reduce-overhead")
+                    )
+                    compiled_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to compile {name}: {e}")
+        logger.info(
+            f"torch.compile applied to {compiled_count}/{len(compile_list)} submodules: {compile_list}"
+        )
     elif args.no_compile:
         logger.info("torch.compile disabled (--no-compile)")
 
