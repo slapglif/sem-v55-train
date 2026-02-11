@@ -44,8 +44,9 @@ E=$(pytime); echo "[STAGE 3/5] Repo downloaded to $REPO_PATH in $(pdiff $S $E)s"
 
 banner "[STAGE 3.5/5] Pre-downloading FineWeb-Edu subset..."
 S=$(pytime)
+# datasets/Arrow aborts on thread cleanup (exit code 134); data is fine, tolerate the crash
 python3 -c "
-import os, json
+import os, json, sys
 from datasets import load_dataset
 from pathlib import Path
 
@@ -55,22 +56,36 @@ cache_file = cache_dir / 'fineweb_edu_score2.jsonl'
 
 if cache_file.exists() and cache_file.stat().st_size > 100_000_000:
     print(f'Cache already exists: {cache_file.stat().st_size / 1e9:.2f} GB')
+    sys.exit(0)
+
+print('Downloading FineWeb-Edu subset (500K docs)...')
+ds = load_dataset('HuggingFaceFW/fineweb-edu', split='train', streaming=True, token=os.environ.get('HF_TOKEN'))
+ds = ds.filter(lambda x: x.get('score', 0) >= 2)
+count = 0
+with open(cache_file, 'w') as f:
+    for doc in ds:
+        text = doc.get('text', '')
+        if text.strip():
+            f.write(json.dumps({'text': text}) + '\n')
+            count += 1
+            if count % 10000 == 0:
+                print(f'  Downloaded {count} docs...')
+            if count >= 500000:
+                break
+    f.flush()
+    os.fsync(f.fileno())
+print(f'Downloaded {count} docs to {cache_file} ({cache_file.stat().st_size / 1e9:.2f} GB)')
+os._exit(0)
+" || true
+python3 -c "
+import os
+f = '/tmp/fineweb_cache/fineweb_edu_score2.jsonl'
+if os.path.exists(f) and os.path.getsize(f) > 100_000_000:
+    sz = os.path.getsize(f) / 1e9
+    lines = sum(1 for _ in open(f))
+    print(f'[VERIFIED] Cache file OK: {lines} docs, {sz:.2f} GB')
 else:
-    print('Downloading FineWeb-Edu subset (500K docs)...')
-    ds = load_dataset('HuggingFaceFW/fineweb-edu', split='train', streaming=True, token=os.environ.get('HF_TOKEN'))
-    ds = ds.filter(lambda x: x.get('score', 0) >= 2)
-    count = 0
-    with open(cache_file, 'w') as f:
-        for doc in ds:
-            text = doc.get('text', '')
-            if text.strip():
-                f.write(json.dumps({'text': text}) + '\n')
-                count += 1
-                if count % 10000 == 0:
-                    print(f'  Downloaded {count} docs...')
-                if count >= 500000:
-                    break
-    print(f'Downloaded {count} docs to {cache_file} ({cache_file.stat().st_size / 1e9:.2f} GB)')
+    print('[ERROR] Cache file missing or too small, falling back to streaming')
 "
 E=$(pytime); echo "[STAGE 3.5/5] Done in $(pdiff $S $E)s"
 
