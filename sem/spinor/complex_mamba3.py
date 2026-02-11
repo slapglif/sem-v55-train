@@ -15,12 +15,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import logging
+import importlib
 from torch import Tensor
 from .spinor_block import SpinorGate
 from .complex_pscan import complex_parallel_scan_chunked
 from ..utils.complex_layernorm import ComplexRMSNorm
 from ..utils.fused_complex_linear import FusedComplexLinear
 from ..utils.complex_ops import safe_complex
+
+
+logger = logging.getLogger(__name__)
 
 
 class ComplexSSMState(nn.Module):
@@ -247,6 +252,7 @@ class ComplexMamba3Layer(nn.Module):
         use_mixed_precision_a: bool = True,
         memory_horizon_ratio: float = 0.0,
         max_seq_length: int = 256,
+        use_mamba2: bool = False,
     ):
         """
         Args:
@@ -264,6 +270,7 @@ class ComplexMamba3Layer(nn.Module):
         self.hidden_dim = hidden_dim
         self.mimo_groups = mimo_groups
         self.group_dim = hidden_dim // mimo_groups
+        self._use_mamba2 = False
 
         assert hidden_dim % mimo_groups == 0, (
             f"hidden_dim {hidden_dim} must be divisible by mimo_groups {mimo_groups}"
@@ -271,49 +278,67 @@ class ComplexMamba3Layer(nn.Module):
 
         # Pre-norm
         self.norm = ComplexRMSNorm(hidden_dim)
+        if use_mamba2:
+            try:
+                mamba_module = importlib.import_module("mamba_ssm")
+                Mamba2 = getattr(mamba_module, "Mamba2")
+                self.mamba2 = Mamba2(
+                    d_model=hidden_dim * 2,
+                    d_state=state_dim,
+                    d_conv=d_conv,
+                    expand=2,
+                    headdim=64,
+                    chunk_size=256,
+                )
+                self._use_mamba2 = True
+            except ImportError:
+                logger.warning(
+                    "mamba-ssm not available; falling back to ComplexSSMState."
+                )
 
-        # Spinor gate (block-diagonal rotation)
-        self.spinor_gate = SpinorGate(hidden_dim, block_size)
+        if not self._use_mamba2:
+            # Spinor gate (block-diagonal rotation)
+            self.spinor_gate = SpinorGate(hidden_dim, block_size)
 
-        # SEOP Fix 8+10: Fused complex depthwise convolution
-        # Single Conv1d with groups=D, 2 input channels (re,im) and 2 output channels
-        # per group implements the complex product matrix [[h_r,-h_i],[h_i,h_r]].
-        # 1 kernel launch instead of 4, same parameter count (2*D*K).
-        # Input layout: interleaved [re_0,im_0,re_1,im_1,...] for memory locality.
-        self.conv = nn.Conv1d(
-            hidden_dim * 2,
-            hidden_dim * 2,
-            kernel_size=d_conv,
-            padding=d_conv - 1,
-            groups=hidden_dim,  # Each group: 2 in → 2 out (complex multiply)
-        )
-        # Initialize: h_real = variance-preserving (Fix 10), h_imag = zero
-        # Conv weight shape: [2D, 2, K] (out_channels, in_channels/groups, kernel)
-        # Per group: [[w_rr, w_ri], [w_ir, w_ii]] kernels
-        # For complex conv at init: w_rr=w_ii=h_real, w_ri=-h_imag=0, w_ir=h_imag=0
-        with torch.no_grad():
-            self.conv.weight.zero_()
-            # Set diagonal blocks (rr and ii) to variance-preserving init
-            for d in range(hidden_dim):
-                # out_channel 2*d (real out), in_channel 0 (real in) = h_real
-                self.conv.weight[2 * d, 0, :].normal_(std=1.0 / math.sqrt(d_conv))
-                # out_channel 2*d+1 (imag out), in_channel 1 (imag in) = h_real (same)
-                self.conv.weight[2 * d + 1, 1, :] = self.conv.weight[2 * d, 0, :]
-            # Off-diagonal blocks (ri, ir) start at zero → pure real conv at init
-        if self.conv.bias is not None:
-            nn.init.zeros_(self.conv.bias)
+            # SEOP Fix 8+10: Fused complex depthwise convolution
+            # Single Conv1d with groups=D, 2 input channels (re,im) and 2 output channels
+            # per group implements the complex product matrix [[h_r,-h_i],[h_i,h_r]].
+            # 1 kernel launch instead of 4, same parameter count (2*D*K).
+            # Input layout: interleaved [re_0,im_0,re_1,im_1,...] for memory locality.
+            self.conv = nn.Conv1d(
+                hidden_dim * 2,
+                hidden_dim * 2,
+                kernel_size=d_conv,
+                padding=d_conv - 1,
+                groups=hidden_dim,  # Each group: 2 in → 2 out (complex multiply)
+            )
+            # Initialize: h_real = variance-preserving (Fix 10), h_imag = zero
+            # Conv weight shape: [2D, 2, K] (out_channels, in_channels/groups, kernel)
+            # Per group: [[w_rr, w_ri], [w_ir, w_ii]] kernels
+            # For complex conv at init: w_rr=w_ii=h_real, w_ri=-h_imag=0, w_ir=h_imag=0
+            with torch.no_grad():
+                self.conv.weight.zero_()
+                # Set diagonal blocks (rr and ii) to variance-preserving init
+                for d in range(hidden_dim):
+                    # out_channel 2*d (real out), in_channel 0 (real in) = h_real
+                    self.conv.weight[2 * d, 0, :].normal_(std=1.0 / math.sqrt(d_conv))
+                    # out_channel 2*d+1 (imag out), in_channel 1 (imag in) = h_real (same)
+                    self.conv.weight[2 * d + 1, 1, :] = self.conv.weight[2 * d, 0, :]
+                # Off-diagonal blocks (ri, ir) start at zero → pure real conv at init
+            if self.conv.bias is not None:
+                nn.init.zeros_(self.conv.bias)
 
-        self.ssm = ComplexSSMState(
-            d_input=self.group_dim,
-            state_dim=state_dim,
-            mimo_groups=mimo_groups,
-            use_mixed_precision_a=use_mixed_precision_a,
-            memory_horizon_ratio=memory_horizon_ratio,
-            max_seq_length=max_seq_length,
-        )
+            self.ssm = ComplexSSMState(
+                d_input=self.group_dim,
+                state_dim=state_dim,
+                mimo_groups=mimo_groups,
+                use_mixed_precision_a=use_mixed_precision_a,
+                memory_horizon_ratio=memory_horizon_ratio,
+                max_seq_length=max_seq_length,
+            )
 
-        # Output projection (complex, fused)
-        self.out_proj = FusedComplexLinear(hidden_dim, hidden_dim, bias=False)
+            # Output projection (complex, fused)
+            self.out_proj = FusedComplexLinear(hidden_dim, hidden_dim, bias=False)
 
         # Learnable magnitude gate threshold (SEOP Fix 12: χ²(2)-CDF matched)
         # For complex Gaussian z, |z|² ~ Exponential(1/2σ²). Using CDF gate
@@ -348,6 +373,13 @@ class ComplexMamba3Layer(nn.Module):
 
         # Pre-norm
         x = self.norm(x)
+
+        if self._use_mamba2:
+            x_real = torch.cat([x.real, x.imag], dim=-1)
+            y_real = self.mamba2(x_real)
+            y = safe_complex(y_real[..., :D], y_real[..., D:])
+            y = y * self.ssm_output_scale
+            return residual + self.residual_scale * y
 
         # Spinor gated rotation
         x = self.spinor_gate(x)

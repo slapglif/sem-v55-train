@@ -47,9 +47,14 @@ class FineWebEduStream:
         self.shard_id = shard_id
         self.total_shards = total_shards
         self.force_download = force_download
-        self.cache_dir = (
-            Path(cache_dir) if cache_dir else Path.home() / ".cache" / "sem" / "fineweb"
-        )
+        job_cache = Path("/tmp/fineweb_cache")
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+        elif job_cache.is_dir() and any(job_cache.glob("*.jsonl")):
+            self.cache_dir = job_cache
+            logger.info(f"[DATA] Found pre-downloaded cache at {job_cache}")
+        else:
+            self.cache_dir = Path.home() / ".cache" / "sem" / "fineweb"
         self.max_cache_docs = max_cache_docs
         self.cache_file = self.cache_dir / f"fineweb_edu_score{min_score}.jsonl"
 
@@ -350,6 +355,7 @@ class PackedStreamingDataset(IterableDataset):
         min_score: int = 2,
         shuffle_buffer: int = 10000,
         dataset_name: str = "HuggingFaceFW/fineweb-edu",
+        cache_dir: Optional[str] = None,
         timing_enabled: bool = False,
     ):
         self.tokenizer = tokenizer
@@ -357,6 +363,7 @@ class PackedStreamingDataset(IterableDataset):
         self.min_score = min_score
         self.shuffle_buffer = shuffle_buffer
         self.dataset_name = dataset_name
+        self.cache_dir = cache_dir
         self.timing_enabled = timing_enabled
 
     def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
@@ -379,6 +386,7 @@ class PackedStreamingDataset(IterableDataset):
             min_score=self.min_score,
             shuffle_buffer=self.shuffle_buffer,
             dataset_name=self.dataset_name,
+            cache_dir=self.cache_dir,
             shard_id=shard_id,
             total_shards=total_shards,
         )

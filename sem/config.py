@@ -39,6 +39,7 @@ class SpinorConfig:
     state_dim: int = 64
     mimo_groups: int = 8
     d_conv: int = 4
+    use_mamba2: bool = False
     memory_horizon_ratio: float = (
         0.0  # τ = ratio * max_seq_length; 0 = use default init (-4.55 ≈ S/e for S=256)
     )

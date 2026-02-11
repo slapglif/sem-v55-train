@@ -66,6 +66,7 @@ class ComplexMamba3LayerV8(nn.Module):
         num_layers: int = 1,
         memory_horizon_ratio: float = 0.0,
         max_seq_length: int = 2048,
+        use_mamba2: bool = False,
         # V8.0 additions
         use_mhc: bool = True,
         mhc_streams: int = 4,
@@ -90,6 +91,7 @@ class ComplexMamba3LayerV8(nn.Module):
             num_layers: Total number of layers (for residual scaling)
             memory_horizon_ratio: τ = ratio * max_seq_length; 0 = default init
             max_seq_length: Maximum sequence length for horizon scaling
+            use_mamba2: Use Mamba2 backend when available
             use_mhc: Use manifold-constrained residuals (requires hyper_connections module)
             mhc_num_iters: Sinkhorn iterations for Birkhoff projection
             mhc_tau: Temperature for Sinkhorn
@@ -118,6 +120,7 @@ class ComplexMamba3LayerV8(nn.Module):
             num_layers=num_layers,
             memory_horizon_ratio=memory_horizon_ratio,
             max_seq_length=max_seq_length,
+            use_mamba2=use_mamba2,
         )
 
         # V8.0: mHC residual (replaces standard residual)
@@ -343,6 +346,7 @@ class SEMModel(nn.Module):
                         num_layers=c.model.num_layers,
                         memory_horizon_ratio=c.spinor.memory_horizon_ratio,
                         max_seq_length=c.model.max_seq_length,
+                        use_mamba2=getattr(c.spinor, "use_mamba2", False),
                         # V8.0 config
                         use_mhc=use_mhc,
                         mhc_streams=getattr(v8, "mhc_streams", 4),
@@ -371,6 +375,7 @@ class SEMModel(nn.Module):
                         num_layers=c.model.num_layers,
                         memory_horizon_ratio=c.spinor.memory_horizon_ratio,
                         max_seq_length=c.model.max_seq_length,
+                        use_mamba2=getattr(c.spinor, "use_mamba2", False),
                     )
                     for _ in range(c.model.num_layers)
                 ]

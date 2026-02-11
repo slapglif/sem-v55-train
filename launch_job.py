@@ -27,22 +27,54 @@ pytime() { python3 -c "import time; print(f'{time.time():.3f}')"; }
 pdiff() { python3 -c "print(f'{float(\"$2\")-float(\"$1\"):.1f}')"; }
 banner() { echo ""; echo "=============================="; echo "$1"; echo "=============================="; }
 
-banner "[STAGE 1/4] Installing UV..."
+banner "[STAGE 1/5] Installing UV..."
 S=$(pytime)
 pip install -q uv 2>&1 | tail -1
-E=$(pytime); echo "[STAGE 1/4] Done in $(pdiff $S $E)s"
+E=$(pytime); echo "[STAGE 1/5] Done in $(pdiff $S $E)s"
 
-banner "[STAGE 2/4] Installing dependencies via UV..."
+banner "[STAGE 2/5] Installing dependencies via UV..."
 S=$(pytime)
-uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]' lightning rich
-E=$(pytime); echo "[STAGE 2/4] Done in $(pdiff $S $E)s"
+uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]' lightning rich mamba-ssm causal-conv1d
+E=$(pytime); echo "[STAGE 2/5] Done in $(pdiff $S $E)s"
 
-banner "[STAGE 3/4] Downloading model repo..."
+banner "[STAGE 3/5] Downloading model repo..."
 S=$(pytime)
 REPO_PATH=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('icarus112/sem-v55-lean-crystal', repo_type='model'))")
-E=$(pytime); echo "[STAGE 3/4] Repo downloaded to $REPO_PATH in $(pdiff $S $E)s"
+E=$(pytime); echo "[STAGE 3/5] Repo downloaded to $REPO_PATH in $(pdiff $S $E)s"
 
-banner "[STAGE 4/4] Starting training..."
+banner "[STAGE 3.5/5] Pre-downloading FineWeb-Edu subset..."
+S=$(pytime)
+python3 -c "
+import os, json
+from datasets import load_dataset
+from pathlib import Path
+
+cache_dir = Path('/tmp/fineweb_cache')
+cache_dir.mkdir(parents=True, exist_ok=True)
+cache_file = cache_dir / 'fineweb_edu_score2.jsonl'
+
+if cache_file.exists() and cache_file.stat().st_size > 100_000_000:
+    print(f'Cache already exists: {cache_file.stat().st_size / 1e9:.2f} GB')
+else:
+    print('Downloading FineWeb-Edu subset (500K docs)...')
+    ds = load_dataset('HuggingFaceFW/fineweb-edu', split='train', streaming=True, token=os.environ.get('HF_TOKEN'))
+    ds = ds.filter(lambda x: x.get('score', 0) >= 2)
+    count = 0
+    with open(cache_file, 'w') as f:
+        for doc in ds:
+            text = doc.get('text', '')
+            if text.strip():
+                f.write(json.dumps({'text': text}) + '\n')
+                count += 1
+                if count % 10000 == 0:
+                    print(f'  Downloaded {count} docs...')
+                if count >= 500000:
+                    break
+    print(f'Downloaded {count} docs to {cache_file} ({cache_file.stat().st_size / 1e9:.2f} GB)')
+"
+E=$(pytime); echo "[STAGE 3.5/5] Done in $(pdiff $S $E)s"
+
+banner "[STAGE 4/5] Starting training..."
 cd $REPO_PATH
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
