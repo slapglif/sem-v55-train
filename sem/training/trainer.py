@@ -339,6 +339,8 @@ class SEMTrainer:
         return dataset.create_dataloader(
             batch_size=self.config.training.micro_batch_size,
             num_workers=self.config.training.num_workers,
+            pin_memory=self.config.training.pin_memory,
+            prefetch_factor=self.config.training.prefetch_factor,
         )
 
     def _build_synthetic_dataloader(self, seq_len: int):

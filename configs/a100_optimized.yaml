@@ -1,5 +1,5 @@
 # SEM V5.5 "Lean Crystal" - 4xA100 80GB Maximum Throughput
-# Sweep-optimized params from 4xA100 cloud sweep (2026-02-08)
+# SEOP Fix 86+87 learnings applied to A100 scale
 # bf16-mixed precision, DDP across 4 GPUs
 
 model:
@@ -18,7 +18,7 @@ encoder:
   sinkhorn_auto_epsilon_scale: 0.04
   soft_sparse: true
   soft_sparse_temp: 0.1
-  simple_mode: true # SEOP Fix: Bypass Sinkhorn entirely for speed (direct embedding)
+  simple_mode: true
 
 spinor:
   block_size: 8
@@ -29,7 +29,7 @@ spinor:
 
 propagator:
   cayley_dt: 0.02
-  num_layers: 1 # SEOP Fix: Decoupled from model depth (was 8)
+  num_layers: 1
   cg_max_iter: 5
   cg_tol: 1.0e-6
   nonlinear_alpha: 0.12
@@ -64,31 +64,32 @@ sampler:
 
 training:
   batch_size: 2048
-  micro_batch_size: 32 # SEOP Fix: Revert to 32 to fix OOM (128 was too aggressive)
+  micro_batch_size: 32
   gradient_checkpointing: true
   dtype: float32
-  learning_rate: 8.6e-4
+  learning_rate: 1.0e-3
   weight_decay: 0.1
-  encoder_lr_scale: 0.016
-  warmup_steps: 500
+  encoder_lr_scale: 0.1
+  warmup_steps: 200
   max_steps: 100000
   gradient_clip: 1.0
   unitary_lambda: 0.006
   unitary_clamp_min: 0.01
   unitary_clamp_max: 6.9
-  low_vram_mode: false # Keep false for speed, only enable if 32 fails
-  label_smoothing: 0.058
+  low_vram_mode: false
+  label_smoothing: 0.01
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 8
+  num_workers: 4
+  prefetch_factor: 8
   shuffle_buffer_size: 50000
   scheduler_type: "wsd"
   stable_steps: 0
   decay_steps: 10000
   lr_min_ratio: 0.1
-  log_interval: 10 # SEOP Fix: Reduce logging frequency to save .item() syncs
+  log_interval: 10
   health_check_interval: 500
-  checkpoint_interval: 200
+  checkpoint_interval: 500
   keep_checkpoints: 5
   wandb_project: "sem-v55-a100"
   wandb_enabled: true
@@ -97,11 +98,11 @@ training:
 
 v8:
   use_lindblad: true
-  use_hybrid_automata: false # SEOP Fix: Disable to save 3 kernels/layer
+  use_hybrid_automata: false
   use_quaternionic: false
   use_mhc: true
   mhc_streams: 8
-  mhc_num_iters: 1 # SEOP Fix: Reduce from 3 to 1 to save Sinkhorn passes
+  mhc_num_iters: 1
   mhc_tau: 0.031
   lindblad_gamma: 0.007
   num_lindblad_ops: 4

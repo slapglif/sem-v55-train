@@ -156,6 +156,8 @@ class TrainingConfig:
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
     tokenizer_path: str = "tokenizer/"
     num_workers: int = 0
+    prefetch_factor: int = 2
+    pin_memory: bool = True
     shuffle_buffer_size: int = 1000
 
     # WSD Scheduler

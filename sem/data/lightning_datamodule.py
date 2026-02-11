@@ -35,7 +35,8 @@ class SEMDataModule(L.LightningDataModule):
         return self.dataset.create_dataloader(
             batch_size=self.config.training.micro_batch_size,
             num_workers=self.config.training.num_workers,
-            pin_memory=True,
+            pin_memory=self.config.training.pin_memory,
+            prefetch_factor=self.config.training.prefetch_factor,
         )
 
     def update_seq_len(self, new_seq_len: int, new_min_score: Optional[int] = None):
