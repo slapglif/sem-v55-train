@@ -266,6 +266,22 @@ def main():
             effective_strategy = DDPStrategy(
                 find_unused_parameters=True,
             )
+        elif (
+            args.strategy == "auto"
+            and device_type == "cuda"
+            and (
+                args.devices == -1
+                or args.devices > 1
+                or (args.devices == 0 and torch.cuda.device_count() > 1)
+            )
+        ):
+            # DDP fix: propagator warmup skips params → DDP must tolerate unused
+            logger.info(
+                "Multi-GPU detected with strategy='auto': using DDPStrategy(find_unused_parameters=True)"
+            )
+            effective_strategy = DDPStrategy(
+                find_unused_parameters=True,
+            )
         else:
             effective_strategy = args.strategy
         effective_precision = args.precision if not plugins else None

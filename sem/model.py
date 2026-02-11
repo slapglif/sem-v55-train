@@ -504,9 +504,12 @@ class SEMModel(nn.Module):
         effective_alpha = self._propagator_alpha
         if self.propagator_enabled and effective_alpha == 0.0:
             effective_alpha = 1.0
-        if effective_alpha > 0.0:
-            psi_prop = self.propagator(psi)  # [B, S, D] complex64
-            psi = psi * (1.0 - effective_alpha) + psi_prop * effective_alpha
+        # DDP fix: ALWAYS run propagator forward and blend so all params
+        # participate in the computation graph and receive gradients.
+        # When alpha==0 the blend is 1.0*psi + 0.0*psi_prop — mathematically
+        # a no-op but keeps propagator params in the backward graph for DDP.
+        psi_prop = self.propagator(psi)  # [B, S, D] complex64
+        psi = psi * (1.0 - effective_alpha) + psi_prop * effective_alpha
 
         # Unitarity regularization / monitoring.
         # SEOP Fix 54: Compute BEFORE final_norm so the metric is meaningful.

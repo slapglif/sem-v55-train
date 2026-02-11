@@ -241,7 +241,7 @@ class CayleySolitonPropagator(nn.Module):
                     # Keep as tensor on GPU, avoid .item() sync
                     # _diag.max() returns a 0-dim tensor
                     _lmax = 2.0 * _diag.max()
-                    self._cheby_lambda_max.copy_(_lmax)
+                    self._cheby_lambda_max.copy_(_lmax.detach())
 
                 # Use cached tensor value
                 _lmax_tensor = self._cheby_lambda_max
