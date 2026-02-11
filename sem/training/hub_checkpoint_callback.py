@@ -70,10 +70,10 @@ class HubCheckpointCallback(L.Callback):
             return
         if step == self._last_uploaded_step:
             return
-        # Only rank 0 uploads
-        if trainer.global_rank != 0:
-            return
-        self._save_and_upload(trainer, pl_module, step)
+        if trainer.global_rank == 0:
+            self._save_and_upload(trainer, pl_module, step)
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
     def on_train_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         if trainer.global_rank != 0:

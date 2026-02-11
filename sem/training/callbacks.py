@@ -173,9 +173,6 @@ class SEMHealthCallback(Callback):
             logger.error(
                 f"Health Error at step {trainer.global_step}: {'; '.join(report.messages)}"
             )
-            for opt in trainer.optimizers:
-                for pg in opt.param_groups:
-                    pg["lr"] *= 0.5
 
 
 # Legacy non-Lightning callbacks for hf_train.py
