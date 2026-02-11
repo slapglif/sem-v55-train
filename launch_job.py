@@ -34,7 +34,10 @@ E=$(pytime); echo "[STAGE 1/5] Done in $(pdiff $S $E)s"
 
 banner "[STAGE 2/5] Installing dependencies via UV..."
 S=$(pytime)
-uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]' lightning rich mamba-ssm causal-conv1d
+uv pip install --system datasets tokenizers pyyaml scipy einops wandb 'huggingface_hub[hf_xet]' lightning rich
+pip install ninja packaging
+pip install --no-build-isolation causal-conv1d mamba-ssm
+python3 -c "from mamba_ssm import Mamba2; print(f'Mamba2 loaded: {Mamba2}')" || echo "[WARN] Mamba2 import failed"
 E=$(pytime); echo "[STAGE 2/5] Done in $(pdiff $S $E)s"
 
 banner "[STAGE 3/5] Downloading model repo..."
@@ -104,7 +107,7 @@ if not token:
 
 api = HfApi(token=token)
 job = api.run_job(
-    image="pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel",
+    image="pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
     command=["bash", "-c", cmd],
     flavor=args.flavor,
     timeout=args.timeout,
