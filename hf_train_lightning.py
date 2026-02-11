@@ -25,6 +25,7 @@ from sem.training.callbacks import (
     SEMHealthCallback,
     SEMConsoleLogger,
 )
+from sem.training.hub_checkpoint_callback import HubCheckpointCallback
 from sem.training.xpu_accelerator import XPUAccelerator
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -245,6 +246,12 @@ def main():
         SEMCurriculumCallback(config),
         SEMHealthCallback(check_interval=config.training.health_check_interval),
         SEMConsoleLogger(log_interval=config.training.log_interval),
+        HubCheckpointCallback(
+            repo_id="icarus112/sem-v55-lean-crystal",
+            every_n_steps=config.training.checkpoint_interval,
+            keep_last_k=config.training.keep_checkpoints,
+            config_path=args.config,
+        ),
     ]
 
     profiler = (
