@@ -35,9 +35,10 @@ class FineWebEduStream:
         shuffle_buffer: int = 1000,
         dataset_name: str = "HuggingFaceFW/fineweb-edu",
         cache_dir: Optional[str] = None,
-        max_cache_docs: int = 100000,
+        max_cache_docs: int = 0,
         shard_id: int = 0,
         total_shards: int = 1,
+        force_download: bool = False,
     ):
         self.min_score = min_score
         self.split = split
@@ -45,6 +46,7 @@ class FineWebEduStream:
         self.dataset_name = dataset_name
         self.shard_id = shard_id
         self.total_shards = total_shards
+        self.force_download = force_download
         self.cache_dir = (
             Path(cache_dir) if cache_dir else Path.home() / ".cache" / "sem" / "fineweb"
         )
@@ -55,26 +57,43 @@ class FineWebEduStream:
         from datasets import load_dataset
         import os
         import json
+        import random
 
-        # SEOP Fix 40: Check for local cache first
+        # SEOP Fix 40 + Fix 87: Check for local cache first
         # Look for any existing cache file (main or worker-specific)
         cache_files = list(
             self.cache_dir.glob(f"fineweb_edu_score{self.min_score}*.jsonl")
         )
-        if cache_files:
+        if cache_files and not self.force_download:
             # Use the largest cache file (most complete)
             cache_file = max(cache_files, key=lambda f: f.stat().st_size)
             cache_size = cache_file.stat().st_size / 1e6
             if cache_size > 1.0:  # Only use if >1MB (not empty/partial)
                 logger.info(
-                    f"[DATA] Using cached data from {cache_file} ({cache_size:.1f}MB)"
+                    f"[DATA] Using cached data from {cache_file} ({cache_size:.1f}MB), "
+                    f"shard {self.shard_id}/{self.total_shards}"
                 )
-                with open(cache_file, "r") as f:
-                    for line in f:
-                        text = json.loads(line).get("text", "")
-                        if text.strip():
-                            yield text
-                return
+                # SEOP Fix 87: Cycle cache indefinitely + shard across workers
+                cycle = 0
+                while True:
+                    line_idx = 0
+                    doc_count = 0
+                    with open(cache_file, "r") as f:
+                        for line in f:
+                            # Shard by line number so each worker gets unique docs
+                            if self.total_shards <= 1 or (
+                                line_idx % self.total_shards == self.shard_id
+                            ):
+                                text = json.loads(line).get("text", "")
+                                if text.strip():
+                                    doc_count += 1
+                                    yield text
+                            line_idx += 1
+                    cycle += 1
+                    logger.info(
+                        f"[DATA] Cache cycle {cycle} complete: "
+                        f"{doc_count} docs from {line_idx} lines (shard {self.shard_id})"
+                    )
 
         logger.info(f"[DATA] Starting FineWeb-Edu stream from {self.dataset_name}")
         logger.info(f"[DATA] Split: {self.split}, min_score: {self.min_score}")
@@ -165,8 +184,7 @@ class FineWebEduStream:
             / f"fineweb_edu_score{self.min_score}_worker{worker_id}.jsonl"
         )
 
-        # Only cache from worker 0 (or main process) to avoid duplication
-        should_cache = self.max_cache_docs > 0 and worker_id == 0
+        should_cache = worker_id == 0
         cache_handle = open(worker_cache, "w") if should_cache else None
         cache_count = 0
 
@@ -184,14 +202,16 @@ class FineWebEduStream:
                             f"[DATA] {doc_count} docs streamed "
                             f"({doc_count / elapsed:.0f} docs/s)"
                         )
-                    # Write to cache (SEOP Fix 40)
-                    if cache_handle and cache_count < self.max_cache_docs:
+                    if cache_handle and (
+                        self.max_cache_docs == 0 or cache_count < self.max_cache_docs
+                    ):
                         cache_handle.write(json.dumps({"text": text}) + "\n")
                         cache_count += 1
-                        if cache_count == self.max_cache_docs:
-                            logger.info(
-                                f"[DATA] Cache full ({cache_count} docs), subsequent docs not cached"
-                            )
+                        if (
+                            self.max_cache_docs > 0
+                            and cache_count == self.max_cache_docs
+                        ):
+                            logger.info(f"[DATA] Cache full ({cache_count} docs)")
                     yield text
         finally:
             if cache_handle:

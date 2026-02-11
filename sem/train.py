@@ -172,6 +172,15 @@ def main():
         action="store_true",
         help="Enable Max Aggression RAM tuning (16GB RAM / 8GB VRAM)",
     )
+    parser.add_argument(
+        "--download-data",
+        type=int,
+        nargs="?",
+        const=500000,
+        default=None,
+        metavar="N",
+        help="Pre-download N docs to local cache then exit (default: 500K)",
+    )
     args = parser.parse_args()
 
     # Optimize CPU for Intel hardware
@@ -206,6 +215,26 @@ def main():
         else:
             device_type = device
         apply_max_aggression(config, device_type)
+
+    # Pre-download data to local cache
+    if args.download_data is not None:
+        from .data.streaming import FineWebEduStream
+
+        target = args.download_data
+        logger.info(f"Pre-downloading {target:,} docs to local cache...")
+        stream = FineWebEduStream(
+            min_score=2,
+            dataset_name=config.training.dataset_name,
+            max_cache_docs=target,
+            force_download=True,
+        )
+        count = 0
+        for _ in stream:
+            count += 1
+            if count >= target:
+                break
+        logger.info(f"Downloaded {count:,} docs. Cache ready for training.")
+        return
 
     # Tokenizer training mode
     if args.tokenizer_train:

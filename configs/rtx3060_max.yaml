@@ -10,8 +10,8 @@ model:
   max_seq_length: 256
 
 training:
-  batch_size: 48
-  micro_batch_size: 48
+  batch_size: 64
+  micro_batch_size: 64
   low_vram_mode: true
   gradient_checkpointing: true
   dtype: float32
@@ -29,8 +29,8 @@ training:
   label_smoothing: 0.01  # SEOP Fix 86: Reduced from 0.058 (was masking convergence signal)
   dataset_name: "HuggingFaceFW/fineweb-edu"
   tokenizer_path: "tokenizer/"
-  num_workers: 8
-  prefetch_factor: 4
+  num_workers: 2
+  prefetch_factor: 8
   pin_memory: true
   shuffle_buffer_size: 10000
   scheduler_type: "wsd"  # SEOP Fix 86: Warmup-Stable-Decay (was cosine)
