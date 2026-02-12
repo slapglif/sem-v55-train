@@ -12,7 +12,12 @@ Tests the full model pipeline end-to-end:
 import torch
 import pytest
 
+requires_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="mamba-ssm requires CUDA"
+)
 
+
+@requires_cuda
 class TestFullForwardPass:
     """Test the complete SEM model forward pass."""
 
@@ -38,8 +43,8 @@ class TestFullForwardPass:
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=3),
         )
 
-        model = SEMModel(config)
-        tokens = torch.randint(0, 100, (2, 16))
+        model = SEMModel(config).cuda()
+        tokens = torch.randint(0, 100, (2, 16), device="cuda")
 
         output = model(tokens, targets=tokens)
 
@@ -71,8 +76,8 @@ class TestFullForwardPass:
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=3),
         )
 
-        model = SEMModel(config)
-        tokens = torch.randint(0, 100, (1, 8))
+        model = SEMModel(config).cuda()
+        tokens = torch.randint(0, 100, (1, 8), device="cuda")
 
         output = model(tokens, targets=tokens)
 
@@ -102,8 +107,8 @@ class TestFullForwardPass:
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=2),
         )
 
-        model = SEMModel(config)
-        tokens = torch.randint(0, 50, (1, 8))
+        model = SEMModel(config).cuda()
+        tokens = torch.randint(0, 50, (1, 8), device="cuda")
 
         output = model(tokens, targets=tokens)
         output["loss"].backward()
@@ -142,13 +147,14 @@ class TestFullForwardPass:
             propagator=PropagatorConfig(cg_max_iter=10, laplacian_sparsity=3),
         )
 
-        model = SEMModel(config)
+        model = SEMModel(config).cuda()
         counts = model.count_parameters()
 
         assert "total" in counts
         assert counts["total"]["total"] > 0
 
 
+@requires_cuda
 class TestTrainingLoop:
     """Test the training loop mechanics."""
 
@@ -175,10 +181,10 @@ class TestTrainingLoop:
             propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
         )
 
-        model = SEMModel(config)
+        model = SEMModel(config).cuda()
         optimizer = ComplexAdamW(model.parameters(), lr=1e-3)
 
-        tokens = torch.randint(0, 50, (2, 8))
+        tokens = torch.randint(0, 50, (2, 8), device="cuda")
 
         # Forward
         output = model(tokens, targets=tokens)
@@ -221,11 +227,11 @@ class TestTrainingLoop:
             ),
         )
 
-        model = SEMModel(config)
+        model = SEMModel(config).cuda()
         optimizer = ComplexAdamW(model.parameters(), lr=1e-3)
 
         # Fixed batch for overfitting test
-        tokens = torch.randint(0, 20, (4, 8))
+        tokens = torch.randint(0, 20, (4, 8), device="cuda")
 
         losses = []
         for _ in range(10):
@@ -269,6 +275,7 @@ class TestConfig:
             assert config.model.hidden_dim == 256
 
 
+@requires_cuda
 class TestSEOPFixes:
     """Test SEOP fixes are properly implemented."""
 
@@ -296,17 +303,12 @@ class TestSEOPFixes:
             training=TrainingConfig(unitary_lambda=0.01),
         )
 
-        model = SEMModel(config)
-        tokens = torch.randint(0, 50, (1, 8))
+        model = SEMModel(config).cuda()
+        tokens = torch.randint(0, 50, (1, 8), device="cuda")
         output = model(tokens, targets=tokens)
 
-        # unitary_divergence should be in output
         assert "unitary_divergence" in output
-        # Loss should still be differentiable
         output["loss"].backward()
-        # Key check: since unitary_divergence is detached, its contribution
-        # to the loss gradient should NOT flow back through the model's
-        # wavefunction path. We verify loss backward completes without error.
 
     def test_seop_fix_35_clamp(self):
         """SEOP Fix 35: psi_energy should be clamped before log²."""
@@ -330,13 +332,10 @@ class TestSEOPFixes:
             propagator=PropagatorConfig(cg_max_iter=5, laplacian_sparsity=2),
         )
 
-        model = SEMModel(config)
-
-        # Test with normal input
-        tokens = torch.randint(0, 50, (1, 8))
+        model = SEMModel(config).cuda()
+        tokens = torch.randint(0, 50, (1, 8), device="cuda")
         output = model(tokens, targets=tokens)
 
-        # unitary_divergence should be finite (clamped prevents explosion)
         assert torch.isfinite(output["unitary_divergence"]), (
             f"unitary_divergence not finite: {output['unitary_divergence']}"
         )
@@ -367,13 +366,11 @@ class TestSEOPFixes:
             ),
         )
 
-        model = SEMModel(config)
+        model = SEMModel(config).cuda()
 
-        # The propagator (or its stack) should have a set_training_step method
         if hasattr(model.propagator, "set_training_step"):
             model.propagator.set_training_step(100)
 
-        # Model should still produce valid output
-        tokens = torch.randint(0, 50, (1, 8))
+        tokens = torch.randint(0, 50, (1, 8), device="cuda")
         output = model(tokens, targets=tokens)
         assert torch.isfinite(output["loss"])

@@ -7,7 +7,12 @@ from pathlib import Path
 from sem.config import SEMConfig, V8Config
 from sem.training.lightning_module import SEMLightningModule
 
+requires_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="mamba-ssm requires CUDA"
+)
 
+
+@requires_cuda
 def test_gradient_checkpointing_no_tensor_mismatch():
     """Verify gradient checkpointing works without tensor count mismatch.
 
@@ -41,13 +46,11 @@ def test_gradient_checkpointing_no_tensor_mismatch():
         use_mhc=False,
     )
 
-    # Create model with gradient checkpointing enabled
-    module = SEMLightningModule(config)
-    module.eval()  # Disable dropout for deterministic behavior
+    module = SEMLightningModule(config).cuda()
+    module.eval()
 
-    # Create dummy input
     B, S = 2, 32
-    token_ids = torch.randint(0, config.model.vocab_size, (B, S))
+    token_ids = torch.randint(0, config.model.vocab_size, (B, S), device="cuda")
 
     # Run forward pass (this will use checkpointing)
     with torch.enable_grad():
