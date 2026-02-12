@@ -10,7 +10,7 @@ repo_id = "icarus112/sem-v55-lean-crystal"
 
 # 1. DELETE GARBAGE FROM HUB FIRST (The nuclear option)
 print("Cleaning garbage from Hub repo...")
-garbage_folders = [".venv", ".pytest_cache", ".ruff_cache", "runs", "checkpoints"]
+garbage_folders = [".venv", ".pytest_cache", ".ruff_cache", "runs"]
 for folder in garbage_folders:
     try:
         api.delete_folder(repo_id=repo_id, path_in_repo=folder, repo_type="model")
@@ -64,7 +64,19 @@ with tempfile.TemporaryDirectory() as tmpdir:
         folder_path=tmpdir,
         repo_id=repo_id,
         repo_type="model",
-        delete_patterns=["*"],  # Delete anything in Hub that is NOT in this upload
+        delete_patterns=[
+            "*.py",
+            "*.yaml",
+            "*.md",
+            "*.toml",
+            "*.json",
+            "*.db",
+            "*.log",
+            "sem/**",
+            "configs/**",
+            "tokenizer/**",
+            "sweep/**",
+        ],  # Preserve checkpoints/
     )
 
 print("Push complete! Repository is now lean.")
