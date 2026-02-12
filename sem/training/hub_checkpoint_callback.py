@@ -72,8 +72,6 @@ class HubCheckpointCallback(L.Callback):
             return
         if trainer.global_rank == 0:
             self._save_and_upload(trainer, pl_module, step)
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
 
     def on_train_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         if trainer.global_rank != 0:
@@ -96,11 +94,19 @@ class HubCheckpointCallback(L.Callback):
         tag = "final" if is_final else f"step_{step}"
         self.local_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Save Lightning checkpoint locally
         ckpt_name = f"{tag}.ckpt"
         ckpt_path = self.local_dir / ckpt_name
         try:
-            trainer.save_checkpoint(str(ckpt_path))
+            # Save model state dict directly — NOT trainer.save_checkpoint()
+            # which triggers DDP broadcasts that desync ranks
+            torch.save(
+                {
+                    "state_dict": pl_module.state_dict(),
+                    "global_step": step,
+                    "epoch": trainer.current_epoch,
+                },
+                str(ckpt_path),
+            )
             logger.info(
                 f"[HubCkpt] Saved local checkpoint: {ckpt_path} "
                 f"({ckpt_path.stat().st_size / 1e6:.1f} MB)"
