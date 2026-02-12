@@ -81,6 +81,11 @@ def main():
         type=float,
         default=0.0,
     )
+    parser.add_argument(
+        "--resume-from-hub",
+        action="store_true",
+        help="Download latest checkpoint from HF Hub and resume training",
+    )
     args = parser.parse_args()
 
     config = SEMConfig.from_yaml(args.config)
@@ -326,8 +331,18 @@ def main():
         log_every_n_steps=config.training.log_interval,
     )
 
+    ckpt_path = None
+    if args.resume_from_hub:
+        ckpt_path = HubCheckpointCallback.resume_from_hub(
+            repo_id="icarus112/sem-v55-lean-crystal",
+        )
+        if ckpt_path:
+            logger.info(f"Resuming from Hub checkpoint: {ckpt_path}")
+        else:
+            logger.info("No Hub checkpoint found — starting fresh")
+
     logger.info("Launching SEM V5.5 Training with PyTorch Lightning")
-    trainer.fit(model, datamodule=datamodule)
+    trainer.fit(model, datamodule=datamodule, ckpt_path=ckpt_path)
 
     if args.push_to_hub:
         from huggingface_hub import HfApi

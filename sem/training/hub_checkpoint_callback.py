@@ -2,11 +2,16 @@
 
 Prevents weight loss when cloud training containers are destroyed (e.g., SIGTERM).
 Uploads checkpoint + config + training state every N steps on rank 0.
+
+Checkpoint format is Lightning-compatible (state_dict + optimizer_states +
+lr_schedulers + global_step + epoch) so `trainer.fit(ckpt_path=...)` can
+resume training seamlessly across multiple cloud job runs.
 """
 
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -97,16 +102,38 @@ class HubCheckpointCallback(L.Callback):
         ckpt_name = f"{tag}.ckpt"
         ckpt_path = self.local_dir / ckpt_name
         try:
-            # Save model state dict directly — NOT trainer.save_checkpoint()
-            # which triggers DDP broadcasts that desync ranks
-            torch.save(
-                {
-                    "state_dict": pl_module.state_dict(),
-                    "global_step": step,
-                    "epoch": trainer.current_epoch,
-                },
-                str(ckpt_path),
-            )
+            # Build Lightning-compatible checkpoint dict manually.
+            # We CANNOT call trainer.save_checkpoint() — it triggers DDP
+            # BROADCAST collectives that desync ranks when called from rank 0 only.
+            ckpt_dict = {
+                "state_dict": pl_module.state_dict(),
+                "global_step": step,
+                "epoch": trainer.current_epoch,
+                "pytorch-lightning_version": L.__version__,
+            }
+
+            # Optimizer states (needed to resume without LR spike / momentum loss)
+            if trainer.optimizers:
+                ckpt_dict["optimizer_states"] = [
+                    opt.state_dict() for opt in trainer.optimizers
+                ]
+
+            # LR scheduler states (needed to resume decay phase correctly)
+            if trainer.lr_scheduler_configs:
+                ckpt_dict["lr_schedulers"] = [
+                    cfg.scheduler.state_dict() for cfg in trainer.lr_scheduler_configs
+                ]
+
+            # Callback states (curriculum stage, etc.)
+            ckpt_dict["callbacks"] = {}
+            for cb in trainer.callbacks:
+                cb_key = type(cb).__qualname__
+                if hasattr(cb, "state_dict"):
+                    cb_state = cb.state_dict()
+                    if cb_state:
+                        ckpt_dict["callbacks"][cb_key] = cb_state
+
+            torch.save(ckpt_dict, str(ckpt_path))
             logger.info(
                 f"[HubCkpt] Saved local checkpoint: {ckpt_path} "
                 f"({ckpt_path.stat().st_size / 1e6:.1f} MB)"
@@ -169,6 +196,68 @@ class HubCheckpointCallback(L.Callback):
             ckpt_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+    @staticmethod
+    def resume_from_hub(
+        repo_id: str,
+        local_dir: str = "hub_checkpoints",
+    ) -> Optional[str]:
+        """Download the latest checkpoint from HF Hub for resume.
+
+        Returns the local path to the checkpoint file, or None if no
+        checkpoint exists on the Hub.  Intended to be called on rank 0
+        before ``trainer.fit()`` so the path can be passed as ``ckpt_path``.
+        """
+        try:
+            from huggingface_hub import HfApi, hf_hub_download
+        except ImportError:
+            logger.warning("[HubCkpt] huggingface_hub not installed — cannot resume")
+            return None
+
+        api = HfApi()
+        try:
+            files = api.list_repo_files(repo_id)
+        except Exception as e:
+            logger.warning(f"[HubCkpt] Could not list repo files: {e}")
+            return None
+
+        ckpt_files = [
+            f for f in files if f.startswith("checkpoints/") and f.endswith(".ckpt")
+        ]
+        if not ckpt_files:
+            logger.info("[HubCkpt] No checkpoints found on Hub — starting fresh")
+            return None
+
+        # Find the highest step checkpoint (or 'final')
+        best_file = None
+        best_step = -1
+        for f in ckpt_files:
+            if "final" in f:
+                best_file = f
+                best_step = float("inf")
+            else:
+                match = re.search(r"step_(\d+)", f)
+                if match:
+                    s = int(match.group(1))
+                    if s > best_step:
+                        best_step = s
+                        best_file = f
+
+        if best_file is None:
+            logger.info("[HubCkpt] No valid checkpoint files found on Hub")
+            return None
+
+        logger.info(f"[HubCkpt] Downloading checkpoint: {best_file}")
+        try:
+            local_path = hf_hub_download(repo_id, best_file, local_dir=local_dir)
+            logger.info(
+                f"[HubCkpt] Downloaded to {local_path} "
+                f"({os.path.getsize(local_path) / 1e6:.1f} MB)"
+            )
+            return local_path
+        except Exception as e:
+            logger.error(f"[HubCkpt] Download failed: {e}")
+            return None
 
     def _cleanup_old_checkpoints(self, api: Any) -> None:
         """Delete old checkpoint files from Hub, keeping only the last K."""

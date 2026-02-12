@@ -11,6 +11,9 @@ parser.add_argument("--push-to-hub", type=str, default=None)
 parser.add_argument(
     "--org", type=str, default=None, help="Organization namespace to run the job under"
 )
+parser.add_argument(
+    "--fresh", action="store_true", help="Start fresh (ignore Hub checkpoints)"
+)
 args, extra = parser.parse_known_args()
 
 extra_args_list = extra.copy()
@@ -100,6 +103,7 @@ export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 python3 hf_train_lightning.py --no-compile --devices -1 --strategy ddp_find_unused_parameters_true --precision bf16-mixed """
+    + ("" if args.fresh else "--resume-from-hub ")
     + extra_args
 )
 
